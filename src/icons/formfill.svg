@@ -1,6 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="FormFill">
-  <rect x="8" y="6" width="48" height="52" rx="9" fill="#1f6feb"/>
-  <rect x="17" y="17" width="30" height="6" rx="3" fill="#fff"/>
-  <rect x="17" y="29" width="20" height="6" rx="3" fill="#fff"/>
-  <path d="M18 45l7 7 20-22" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="FormFill Assistant">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="14" x2="110" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20D9E9"/>
+      <stop offset=".46" stop-color="#1976F3"/>
+      <stop offset="1" stop-color="#6D48F5"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="32" y1="74" x2="88" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19D9C4"/>
+      <stop offset="1" stop-color="#55E3A9"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="76" y1="72" x2="112" y2="114" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#23E3E8"/>
+      <stop offset=".52" stop-color="#1577F4"/>
+      <stop offset="1" stop-color="#6C45F2"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#0A2258" flood-opacity=".26"/>
+    </filter>
+  </defs>
+
+  <rect x="5" y="5" width="118" height="118" rx="30" fill="url(#bg)"/>
+  <path d="M22 99c18 13 48 16 75 4 13-6 20-16 24-27v18c0 16-13 29-29 29H34C18 123 5 110 5 94V73c3 10 8 19 17 26Z" fill="#091D69" opacity=".18"/>
+  <circle cx="96" cy="29" r="20" fill="#63F0E1" opacity=".18"/>
+
+  <g filter="url(#shadow)">
+    <rect x="20" y="23" width="77" height="82" rx="16" fill="#F9FCFF"/>
+    <rect x="20" y="23" width="77" height="18" rx="16" fill="#0D5EEA"/>
+    <path d="M20 34h77v7H20z" fill="#0D5EEA"/>
+    <circle cx="30" cy="32" r="2.7" fill="#FF68C4"/>
+    <circle cx="39" cy="32" r="2.7" fill="#4FE6E4"/>
+    <circle cx="48" cy="32" r="2.7" fill="#59E9A5"/>
+
+    <rect x="29" y="49" width="58" height="17" rx="7" fill="#EAF3FF" stroke="#B8D2F4"/>
+    <circle cx="38" cy="57.5" r="3.7" fill="#286FE8"/>
+    <rect x="47" y="55" width="31" height="5" rx="2.5" fill="#9DCBFF"/>
+
+    <rect x="29" y="71" width="58" height="17" rx="7" fill="#EAF3FF" stroke="#B8D2F4"/>
+    <rect x="34" y="76" width="10" height="8" rx="2.5" fill="#286FE8"/>
+    <path d="m36.5 79 2.2 2.2 4.1-4.1" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="49" y="77.5" width="27" height="5" rx="2.5" fill="#9DCBFF"/>
+
+    <rect x="29" y="93" width="42" height="7" rx="3.5" fill="url(#accent)"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <path d="M92 72c9 4 16 6 24 7v13c0 14-9 26-24 31-15-5-24-17-24-31V79c8-1 15-3 24-7Z" fill="#fff" opacity=".96"/>
+    <path d="M92 77c7 3 13 5 19 6v9c0 11-7 20-19 25-12-5-19-14-19-25v-9c6-1 12-3 19-6Z" fill="url(#shield)"/>
+    <rect x="84" y="91" width="16" height="13" rx="4" fill="#fff"/>
+    <path d="M87 91v-3.5a5 5 0 0 1 10 0V91" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="92" cy="97" r="1.8" fill="#2357C6"/>
+  </g>
+
+  <g fill="#fff">
+    <path d="M103 52c1.1 4.3 3.4 6.6 7.8 7.8-4.4 1.1-6.7 3.4-7.8 7.8-1.1-4.4-3.4-6.7-7.8-7.8 4.4-1.2 6.7-3.5 7.8-7.8Z" opacity=".96"/>
+    <path d="M86 13c.7 2.8 2.2 4.3 5 5-2.8.7-4.3 2.2-5 5-.7-2.8-2.2-4.3-5-5 2.8-.7 4.3-2.2 5-5Z" opacity=".82"/>
+  </g>
 </svg>
