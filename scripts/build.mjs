@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const root = process.cwd();
 const dist = resolve(root, "dist");
+const firefoxTarget = "firefox126";
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 
@@ -14,20 +15,21 @@ await build({
   build: {
     outDir: resolve(dist, "sidebar"),
     emptyOutDir: false,
-    target: "firefox121",
+    target: firefoxTarget,
   },
 });
 
 for (const [entry, fileName] of [
   ["src/background/background.ts", "background.js"],
   ["src/content/index.ts", "content.js"],
+  ["src/content/capture-mask.ts", "capture-mask.js"],
 ]) {
   await build({
     configFile: false,
     build: {
       outDir: dist,
       emptyOutDir: false,
-      target: "firefox121",
+      target: firefoxTarget,
       minify: false,
       lib: {
         entry: resolve(root, entry),
