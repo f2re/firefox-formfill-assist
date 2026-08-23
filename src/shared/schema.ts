@@ -8,7 +8,7 @@ const operation = z.object({
   value: primitive.optional(),
 });
 
-const fieldIdPattern = /^(?:F\d{2,}|I\d+-F\d{2,}|P\d+-F\d{2,})$/;
+const fieldIdPattern = /^(?:F\d{2,}|I\d+-F\d{2,}|P\d+-(?:F\d{2,}|I\d+-F\d{2,}))$/;
 
 export const fillRequestSchema = z.object({
   version: z.literal(1),
