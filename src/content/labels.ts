@@ -1,4 +1,5 @@
 import { normalizeText } from "../shared/normalize";
+import { isInput, isTextArea } from "./dom";
 
 function textOf(element: Element | null): string {
   return (element?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
@@ -46,7 +47,7 @@ export function getElementLabel(element: HTMLElement): string {
     if (candidates[0] && candidates[0].length <= 180) return candidates[0];
   }
 
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+  if (isInput(element) || isTextArea(element)) {
     const placeholder = element.placeholder.trim();
     if (placeholder) return placeholder.slice(0, 180);
   }
@@ -64,10 +65,10 @@ export function getElementLabel(element: HTMLElement): string {
 }
 
 const sensitivePattern =
-  /\b(password|passwd|парол|cvv|cvc|one.?time|otp|однораз|api.?key|secret.?key|token|security.?code|код.?безопасности)\b/i;
+  /(password|passwd|парол|cvv|cvc|one.?time|otp|однораз|api.?key|secret.?key|token|security.?code|код.?безопасности|банковск.{0,24}карт|номер.{0,16}карт)/i;
 
 export function isSensitiveField(element: HTMLElement, label: string): boolean {
-  if (element instanceof HTMLInputElement) {
+  if (isInput(element)) {
     if (element.type === "password") return true;
     const autocomplete = normalizeText(element.autocomplete);
     if (
