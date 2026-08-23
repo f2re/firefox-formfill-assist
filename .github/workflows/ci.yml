@@ -21,10 +21,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Install Playwright Firefox
         run: npx playwright install --with-deps firefox
@@ -55,10 +56,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck and unit tests
         run: npm run check
@@ -71,6 +73,12 @@ jobs:
 
       - name: Package ZIP and XPI
         run: npm run package
+
+      - name: Verify reproducible package bytes
+        run: |
+          cp artifacts/SHA256SUMS /tmp/formfill-first-SHA256SUMS
+          npm run package
+          diff -u /tmp/formfill-first-SHA256SUMS artifacts/SHA256SUMS
 
       - name: Upload Firefox build
         uses: actions/upload-artifact@v7

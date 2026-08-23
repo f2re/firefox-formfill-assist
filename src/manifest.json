@@ -2,12 +2,15 @@
   "manifest_version": 3,
   "name": "FormFill Assistant",
   "short_name": "FormFill",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Заполняет веб-формы по проверенному Fxx JSON без автоматической отправки формы.",
   "browser_specific_settings": {
     "gecko": {
       "id": "firefox-formfill-assist@f2re.github",
-      "strict_min_version": "121.0"
+      "strict_min_version": "121.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   },
   "permissions": [

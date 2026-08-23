@@ -10,7 +10,42 @@ permissions:
   contents: write
 
 jobs:
+  firefox-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright Firefox
+        run: npx playwright install --with-deps firefox
+
+      - name: Firefox E2E safety matrix
+        run: npm run test:e2e
+
+      - name: Upload E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: firefox-release-e2e-diagnostics-${{ github.sha }}
+          path: |
+            playwright-report/**
+            test-results/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   release:
+    needs: firefox-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -24,15 +59,16 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
-      - name: Verify
+      - name: Verify version, types and unit tests
         run: npm run check
 
-      - name: Build and lint
+      - name: Build, Mozilla lint and package
         run: |
           npm run build
           npm run lint:extension
@@ -46,6 +82,10 @@ jobs:
             --source-dir dist \
             --artifacts-dir signed \
             --channel unlisted
+          (
+            cd signed
+            sha256sum ./* > SHA256SUMS
+          )
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
