@@ -1,5 +1,5 @@
 import { build } from "vite";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = process.cwd();
@@ -44,5 +44,13 @@ for (const [entry, fileName] of [
 await cp(resolve(root, "src/manifest.json"), resolve(dist, "manifest.json"));
 await mkdir(resolve(dist, "icons"), { recursive: true });
 await cp(resolve(root, "src/icons/formfill.svg"), resolve(dist, "icons/formfill.svg"));
+
+const amoIconBase64 = (await readFile(resolve(root, "src/icons/formfill-128.png.b64"), "utf8")).trim();
+const amoIcon = Buffer.from(amoIconBase64, "base64");
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+if (amoIcon.length < 32 || !amoIcon.subarray(0, pngSignature.length).equals(pngSignature)) {
+  throw new Error("src/icons/formfill-128.png.b64 is not a valid PNG payload");
+}
+await writeFile(resolve(dist, "icons/formfill-128.png"), amoIcon);
 
 console.log("Built extension in dist/");
