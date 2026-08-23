@@ -1,4 +1,5 @@
 import { bestTextMatch, normalizeText } from "../shared/normalize";
+import { isInput } from "./dom";
 
 export interface OptionMatch {
   value: string;
@@ -32,7 +33,7 @@ export function matchSelectOption(select: HTMLSelectElement, requested: unknown)
 
 export function matchRadioOption(elements: HTMLElement[], requested: unknown): { element: HTMLInputElement; label: string; confidence: number } | null {
   const radios = elements.filter(
-    (element): element is HTMLInputElement => element instanceof HTMLInputElement && element.type === "radio",
+    (element): element is HTMLInputElement => isInput(element) && element.type === "radio",
   );
   const labels = radios.map((radio) => {
     const explicit = radio.id
@@ -53,7 +54,7 @@ export function formatDateForElement(element: HTMLInputElement | HTMLTextAreaEle
   if (!match) return isoDate;
   const [, year, month, day] = match;
 
-  if (element instanceof HTMLInputElement && element.type === "date") return isoDate;
+  if (isInput(element) && element.type === "date") return isoDate;
   const hint = `${element.getAttribute("placeholder") ?? ""} ${element.getAttribute("pattern") ?? ""}`.toLowerCase();
   if (hint.includes("dd.mm") || hint.includes("дд.мм")) return `${day}.${month}.${year}`;
   if (hint.includes("dd/mm") || hint.includes("дд/мм")) return `${day}/${month}/${year}`;
