@@ -26,7 +26,9 @@ function publicField(field: FieldDescriptor, session?: GptSessionContext): objec
 }
 
 export function makeGptPacket(manifest: FormManifest, session?: GptSessionContext): string {
-  const idPattern = session ? `P${session.pageNumber}-Fxx` : "Fxx или I<n>-Fxx";
+  const idPattern = session
+    ? `P${session.pageNumber}-Fxx или P${session.pageNumber}-I<n>-Fxx`
+    : "Fxx или I<n>-Fxx";
   const safeManifest: Record<string, unknown> = {
     page: new URL(manifest.page).origin + new URL(manifest.page).pathname,
     pageFingerprint: manifest.pageFingerprint,
@@ -59,7 +61,7 @@ export function makeGptPacket(manifest: FormManifest, session?: GptSessionContex
     "",
     "ЖЁСТКИЕ ПРАВИЛА:",
     session
-      ? `1. Используй только id текущей страницы, реально присутствующие в [FORM_MANIFEST]: P${session.pageNumber}-Fxx. Не создавай новые id и не используй P# другой страницы.`
+      ? `1. Используй только id текущей страницы, реально присутствующие в [FORM_MANIFEST]: P${session.pageNumber}-Fxx или P${session.pageNumber}-I<n>-Fxx. Не создавай новые id и не используй P# другой страницы.`
       : "1. Используй только id, реально присутствующие в [FORM_MANIFEST]: Fxx или I<n>-Fxx. Не создавай новые id.",
     "2. Никогда не придумывай ФИО, даты, номера, адреса, организации, значения списков или ответы. Неизвестное поле просто не включай в fields.",
     "3. Не используй null, пустую строку, false или 0 как замену неизвестному значению. Неизвестное значение означает: ключ поля отсутствует в fields.",
