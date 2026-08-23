@@ -1,6 +1,8 @@
-# Firefox AMO signing in GitHub Actions
+# Firefox AMO signing and product metadata in GitHub Actions
 
-FormFill Assistant releases are intended to ship with a Mozilla-signed XPI. The release workflow uses Mozilla `web-ext sign` with the `unlisted` channel, so the signed XPI can be distributed from GitHub Releases without publishing the extension as a public AMO listing.
+FormFill Assistant production releases ship with a Mozilla-signed XPI. The release workflow uses Mozilla `web-ext sign` with the `unlisted` channel, so the signed XPI can be distributed from GitHub Releases without requiring a public AMO listing.
+
+The same AMO credentials are also used to keep the **Developer Hub / AMO product icon** synchronized with the extension branding.
 
 ## 1. Create AMO API credentials
 
@@ -13,13 +15,13 @@ FormFill Assistant releases are intended to ship with a Mozilla-signed XPI. The 
 
 Do not commit either value to the repository, workflow YAML, issues, logs, or documentation.
 
-The extension already has a stable Firefox add-on ID in `src/manifest.json`:
+The extension has a stable Firefox add-on ID in `src/manifest.json`:
 
 ```text
 firefox-formfill-assist@f2re.github
 ```
 
-Manifest V3 signing requires a stable extension ID; updates must keep this ID unchanged.
+Manifest V3 signing and metadata updates must keep this ID unchanged.
 
 ## 2. Add GitHub Actions repository secrets
 
@@ -32,9 +34,25 @@ WEB_EXT_API_KEY=<AMO JWT issuer>
 WEB_EXT_API_SECRET=<AMO JWT secret>
 ```
 
-The release workflow reads the standard environment variables supported by `web-ext`.
+The release workflow reads the standard environment variables supported by `web-ext` and uses the same credentials for authenticated AMO API requests.
 
-## 3. What the release workflow does
+## 3. Why AMO can show a green puzzle icon
+
+There are two related but separate icon systems:
+
+1. `manifest.json → icons` controls the extension icon inside Firefox, for example `about:addons`.
+2. The AMO/Developer Hub product page stores its own `icon` metadata.
+
+Updating the icon in a later extension package does **not reliably replace an existing AMO product icon**. AMO exposes a dedicated authenticated endpoint for this metadata:
+
+```text
+PATCH /api/v5/addons/addon/<guid>/
+multipart field: icon=<PNG/JPEG>
+```
+
+FormFill Assistant therefore keeps a square 128×128 PNG branding asset and the release workflow uploads it to AMO after signing. The source asset is stored as `src/icons/formfill-128.png.b64`; `npm run build` materializes it as `dist/icons/formfill-128.png`.
+
+## 4. What the release workflow does
 
 A release must pass, in order:
 
@@ -54,36 +72,25 @@ npx web-ext sign \
 ```
 
 7. Verification that AMO returned exactly one non-empty signed `.xpi`.
-8. SHA-256 generation for the signed XPI.
-9. Immutable tag verification/creation.
-10. Upload of unsigned developer artifacts plus the signed XPI to GitHub Actions and GitHub Release.
+8. Stable rename to `firefox-formfill-assist-X.Y.Z-signed.xpi` and SHA-256 generation.
+9. Authenticated AMO API upload of the 128×128 product icon.
+10. Immutable tag verification/creation.
+11. Upload of developer artifacts plus the signed XPI to GitHub Actions and GitHub Release.
 
-If either AMO secret is missing, the release fails before publication. A successful release can no longer silently contain only an unsigned XPI.
-
-## 4. Sign the existing v0.3.1 release
-
-After the two repository secrets are configured, run **Actions → Release / Firefox → Run workflow** on `main`.
-
-The current pipeline may safely reuse the immutable `v0.3.1` tag when `main` differs from that tag only in release automation/documentation. It does not move or rewrite the tag. It rebuilds the same extension payload, submits it to AMO for unlisted signing, and uploads the returned signed XPI to the existing GitHub Release.
-
-Alternatively, creating an issue with the exact title below triggers the same gated workflow:
-
-```text
-[release] v0.3.1
-```
-
-Close the trigger issue after a successful release.
+If either AMO secret is missing, signing or product metadata synchronization cannot pass and the production release is not published.
 
 ## 5. Result
 
-A successful GitHub Release should contain at least:
+A successful GitHub Release contains at least:
 
 ```text
-formfill_assistant-0.3.1.zip
-firefox-formfill-assist-0.3.1-unsigned.xpi
+formfill_assistant-X.Y.Z.zip
+firefox-formfill-assist-X.Y.Z-unsigned.xpi
 SHA256SUMS
-<mozilla-returned-name>.xpi          # signed, installable in normal Firefox
-signed/SHA256SUMS or signed checksum artifact
+firefox-formfill-assist-X.Y.Z-signed.xpi
+signed/SHA256SUMS
 ```
 
-The Mozilla-returned signed XPI is the file intended for normal persistent installation in release Firefox. The `-unsigned.xpi` remains a developer/debug artifact.
+The `-signed.xpi` is intended for normal persistent installation in release Firefox. The `-unsigned.xpi` remains a developer/debug artifact.
+
+AMO image resizing/cache updates are asynchronous, so the Developer Hub icon can take a short time to refresh after the API accepts the new PNG.
