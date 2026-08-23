@@ -14,7 +14,7 @@
     "allowImportingTsExtensions": false,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["firefox-webext-browser", "vitest/globals"]
+    "types": ["node", "firefox-webext-browser", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"]
 }
