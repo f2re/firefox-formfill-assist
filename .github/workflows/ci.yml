@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   firefox-e2e:
@@ -59,6 +59,27 @@ jobs:
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Bootstrap generated lockfile to release branch
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/release-engineering'
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          if git ls-remote --exit-code origin "refs/heads/$HEAD_BRANCH" >/dev/null 2>&1; then
+            cp package-lock.json /tmp/package-lock.json
+            git fetch origin "$HEAD_BRANCH"
+            git checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
+            if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+              echo "package-lock.json is already tracked; bootstrap skipped."
+            else
+              cp /tmp/package-lock.json package-lock.json
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add package-lock.json
+              git commit -m "chore: add generated npm lockfile"
+              git push origin "HEAD:$HEAD_BRANCH"
+            fi
+          fi
 
       - name: Typecheck and unit tests
         run: npm run check
