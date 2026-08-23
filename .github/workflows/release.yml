@@ -67,7 +67,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E and gated build before tagging/publishing."
+          gh issue comment "${{ github.event.issue.number }}" --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E and gated build. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
   firefox-e2e:
     needs: prepare
@@ -202,4 +202,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "Published ${RELEASE_TAG}: Firefox E2E, checks, lint, deterministic packaging and GitHub Release completed."
+          gh issue comment "${{ github.event.issue.number }}" --body "Published ${RELEASE_TAG}: Firefox E2E, checks, lint, deterministic packaging and GitHub Release completed. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+  notify-failure:
+    needs: [prepare, firefox-e2e, release]
+    if: always() && github.event_name == 'issues' && needs.prepare.outputs.release_needed == 'true' && needs.release.result != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report failed release gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          E2E_RESULT: ${{ needs.firefox-e2e.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body "Release ${{ needs.prepare.outputs.tag }} did not publish. Firefox E2E: ${E2E_RESULT}; release job: ${RELEASE_RESULT}. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
