@@ -1,5 +1,6 @@
 import { bestTextMatch, normalizeText } from "../shared/normalize";
 import { setInputValue, setContentEditable } from "./values";
+import { isInput, isTextArea, keyboardEventFor, mouseEventFor } from "./dom";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,17 +18,19 @@ function optionElements(owner: Document): HTMLElement[] {
   });
 }
 
-export async function fillCombobox(element: HTMLElement, requested: string): Promise<{ ok: boolean; actual?: string; confidence?: number; message?: string }> {
+export async function fillCombobox(element: HTMLElement, requested: string): Promise<{ ok: boolean; actual?: string; expected?: string; confidence?: number; message?: string }> {
   element.focus();
-  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
+  element.dispatchEvent(mouseEventFor(element, "mousedown", { bubbles: true, composed: true }));
   element.click();
 
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+  if (isInput(element) || isTextArea(element)) {
     setInputValue(element, requested);
   } else if (element.isContentEditable) {
     setContentEditable(element, requested);
   } else {
-    element.dispatchEvent(new KeyboardEvent("keydown", { key: requested[0] ?? "", bubbles: true }));
+    element.dispatchEvent(
+      keyboardEventFor(element, "keydown", { key: requested[0] ?? "", bubbles: true, composed: true }),
+    );
   }
 
   await sleep(140);
@@ -40,21 +43,33 @@ export async function fillCombobox(element: HTMLElement, requested: string): Pro
   }
 
   const option = options.find((candidate) => normalizeText(candidate.textContent) === normalizeText(best.value));
-  if (!option) return { ok: false, confidence: best.confidence, message: "Опция исчезла до выбора." };
+  if (!option) return { ok: false, expected: best.value, confidence: best.confidence, message: "Опция исчезла до выбора." };
 
-  option.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
+  option.dispatchEvent(mouseEventFor(option, "mousedown", { bubbles: true, composed: true }));
   option.click();
-  await sleep(60);
+  await sleep(80);
 
   const actual =
-    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    isInput(element) || isTextArea(element)
       ? element.value
       : element.getAttribute("aria-valuetext") ?? element.textContent ?? "";
 
+  const actualMatches =
+    normalizeText(actual) === normalizeText(best.value) ||
+    normalizeText(actual) === normalizeText(requested);
+  const ariaSelected = option.getAttribute("aria-selected") === "true";
+  const listClosed = element.getAttribute("aria-expanded") === "false" || !option.isConnected;
+  const verified = actualMatches && (ariaSelected || listClosed);
+
   return {
-    ok: normalizeText(actual) === normalizeText(best.value) || best.confidence >= 0.95,
+    ok: verified,
     actual,
+    expected: best.value,
     confidence: best.confidence,
-    message: best.confidence < 0.95 ? `Выбран близкий вариант: ${best.value}` : undefined,
+    message: verified
+      ? best.confidence < 0.95
+        ? `Выбран близкий вариант: ${best.value}`
+        : undefined
+      : `Опция «${best.value}» была нажата, но компонент не подтвердил выбор.`,
   };
 }
