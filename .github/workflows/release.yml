@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: firefox-release-${{ github.ref }}
@@ -60,6 +61,14 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "release_needed=${RELEASE_NEEDED}" >> "$GITHUB_OUTPUT"
           echo "Release candidate: ${TAG}; needed=${RELEASE_NEEDED}"
+
+      - name: Mark release trigger accepted
+        if: github.event_name == 'issues' && steps.meta.outputs.release_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body "Release ${{
+            steps.meta.outputs.tag }} accepted. Running Firefox E2E and gated build before tagging/publishing."
 
   firefox-e2e:
     needs: prepare
@@ -188,3 +197,10 @@ jobs:
           files: |
             artifacts/*
             signed/*
+
+      - name: Mark issue release published
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body "Published ${RELEASE_TAG}: Firefox E2E, checks, lint, deterministic packaging and GitHub Release completed."
