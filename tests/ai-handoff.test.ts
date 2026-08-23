@@ -35,15 +35,30 @@ describe("planAiHandoff", () => {
     expect(plan.prompt).not.toContain('"fieldPrefix"');
   });
 
-  it("binds the prompt to the active Pn-Fxx session page", () => {
+  it("binds the prompt to the active Pn field namespace", () => {
     const page = manifest();
     const session = acceptManifestInSession(createFormSession(Date.now(), "session-test"), page);
     const plan = planAiHandoff(page, session);
 
     expect(plan.pageNumber).toBe(1);
-    expect(plan.fieldNamespace).toBe("P1-Fxx");
+    expect(plan.fieldNamespace).toBe("P1-Fxx / P1-I<n>-Fxx");
     expect(plan.prompt).toContain('"id": "P1-F01"');
     expect(plan.prompt).toContain('"id": "session-test"');
+  });
+
+  it("preserves iframe identity inside the active session page", () => {
+    const page = manifest();
+    page.fields.push({
+      ...page.fields[0]!,
+      id: "I2-F03",
+      label: "Поле iframe",
+      fingerprint: { ...page.fields[0]!.fingerprint, label: "Поле iframe", domPath: "iframe[2]>input" },
+    });
+    const session = acceptManifestInSession(createFormSession(Date.now(), "session-test"), page);
+    const plan = planAiHandoff(page, session);
+
+    expect(plan.prompt).toContain('"id": "P1-I2-F03"');
+    expect(plan.prompt).toContain("P1-I<n>-Fxx");
   });
 
   it("refuses to prepare a prompt for an unconfirmed next page", () => {
