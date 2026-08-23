@@ -93,6 +93,13 @@ button.text-button {
   font-size: 11px;
 }
 
+button.text-button.compact {
+  width: auto;
+  min-height: 28px;
+  margin-top: 0;
+  white-space: nowrap;
+}
+
 .status {
   font-size: 12px;
   line-height: 1.4;
@@ -117,6 +124,44 @@ button.text-button {
   border-color: #a7d7b8;
   background: #f0fdf4;
   color: #166534;
+}
+
+.session-card {
+  display: grid;
+  gap: 8px;
+}
+
+.session-candidate {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #f0c36a;
+  border-radius: 8px;
+  background: rgba(255, 251, 235, .78);
+}
+
+.session-candidate p { margin: 0; }
+
+.session-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.session-pages span {
+  border: 1px solid #d7dde5;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 10px;
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.session-pages span.selected {
+  border-color: #8cb4ef;
+  background: #e8f0fe;
+  color: #174ea6;
+  font-weight: 650;
 }
 
 textarea {
@@ -265,6 +310,7 @@ details summary {
   }
   .segmented { justify-content: flex-start; }
   .actions.two { grid-template-columns: 1fr; }
+  button.text-button.compact { width: 100%; }
 }
 
 @media (min-width: 440px) {
@@ -282,7 +328,9 @@ details summary {
   .error { background: #3a1e23; color: #fecdd3; }
   .warning { background: #392e18; color: #fde68a; }
   .success { background: #16321f; color: #bbf7d0; }
-  .segmented button.selected { background: #233b63; border-color: #537bb8; color: #d9e8ff; }
-  .problem-item { background: #332b19; border-color: #6d5728; }
+  .segmented button.selected,
+  .session-pages span.selected { background: #233b63; border-color: #537bb8; color: #d9e8ff; }
+  .session-pages span { background: #24282e; border-color: #454b55; color: #b6beca; }
+  .session-candidate, .problem-item { background: #332b19; border-color: #6d5728; }
   .problem-item span { color: #f6d58b; }
 }

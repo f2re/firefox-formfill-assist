@@ -110,6 +110,7 @@ export type ContentAction =
   | "ping"
   | "scan"
   | "toggleOverlay"
+  | "highlightProblems"
   | "preview"
   | "fill"
   | "undo";

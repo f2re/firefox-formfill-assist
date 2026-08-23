@@ -13,14 +13,25 @@ interface FailedReportItem {
 export interface GptFeedbackReport {
   version: 1;
   pageFingerprint: string;
+  session?: { id: string; page: number };
   success: string[];
   unchanged: string[];
   failed: FailedReportItem[];
   note: string;
 }
 
-export function makeGptFeedbackReport(manifest: FormManifest, result: FillResult): GptFeedbackReport {
+export interface GptFeedbackOptions {
+  mapId?: (id: string) => string;
+  session?: { id: string; page: number };
+}
+
+export function makeGptFeedbackReport(
+  manifest: FormManifest,
+  result: FillResult,
+  options: GptFeedbackOptions = {},
+): GptFeedbackReport {
   const descriptors = new Map(manifest.fields.map((field) => [field.id, field]));
+  const mapId = options.mapId ?? ((id: string) => id);
   const success: string[] = [];
   const unchanged: string[] = [];
   const failed: FailedReportItem[] = [];
@@ -30,17 +41,17 @@ export function makeGptFeedbackReport(manifest: FormManifest, result: FillResult
     if (descriptor?.sensitive) continue;
 
     if (fieldResult.status === "filled") {
-      success.push(fieldResult.id);
+      success.push(mapId(fieldResult.id));
       continue;
     }
     if (fieldResult.status === "same") {
-      unchanged.push(fieldResult.id);
+      unchanged.push(mapId(fieldResult.id));
       continue;
     }
     if (fieldResult.status !== "review" && fieldResult.status !== "error") continue;
 
     failed.push({
-      id: fieldResult.id,
+      id: mapId(fieldResult.id),
       label: descriptor?.label ?? fieldResult.label,
       status: fieldResult.status,
       requested: fieldResult.requestedValue,
@@ -53,13 +64,20 @@ export function makeGptFeedbackReport(manifest: FormManifest, result: FillResult
   return {
     version: 1,
     pageFingerprint: manifest.pageFingerprint,
+    ...(options.session ? { session: options.session } : {}),
     success,
     unchanged,
     failed,
-    note: "Сформируй корректирующий JSON только для failed. Не добавляй неизвестные значения и не используй DOM selectors.",
+    note: options.session
+      ? `Сформируй корректирующий JSON только для failed страницы P${options.session.page}. Не добавляй неизвестные значения и не используй DOM selectors.`
+      : "Сформируй корректирующий JSON только для failed. Не добавляй неизвестные значения и не используй DOM selectors.",
   };
 }
 
-export function stringifyGptFeedbackReport(manifest: FormManifest, result: FillResult): string {
-  return JSON.stringify(makeGptFeedbackReport(manifest, result), null, 2);
+export function stringifyGptFeedbackReport(
+  manifest: FormManifest,
+  result: FillResult,
+  options: GptFeedbackOptions = {},
+): string {
+  return JSON.stringify(makeGptFeedbackReport(manifest, result, options), null, 2);
 }
