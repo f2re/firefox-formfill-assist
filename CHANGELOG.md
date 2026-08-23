@@ -2,6 +2,16 @@
 
 All notable user-facing changes to FormFill Assistant are documented here.
 
+## 0.4.1
+
+### Branding / AMO
+
+- added a real 128×128 PNG product icon to the built extension alongside the vector toolbar icon;
+- `manifest.icons[128]` now references the raster product icon used by Firefox/AMO surfaces;
+- release CI authenticates to the AMO v5 API and uploads the same 128×128 PNG to the add-on's separate product-page icon metadata;
+- added a regression test for the PNG signature, dimensions and manifest branding contract;
+- documented why the AMO Developer Hub can show the default green puzzle icon even when the XPI contains a valid manifest icon.
+
 ## 0.4.0
 
 ### Product and UX
