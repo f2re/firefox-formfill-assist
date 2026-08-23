@@ -1,22 +1,26 @@
 # Firefox FormFill Assistant
 
-Firefox WebExtension для заполнения произвольных веб-форм по JSON, подготовленному ChatGPT. Расширение само сканирует DOM, присваивает полям временные `Fxx`, формирует безопасный manifest, показывает preview и только после подтверждения записывает значения в элементы страницы.
+Firefox WebExtension для безопасного заполнения произвольных веб-форм по JSON, подготовленному vision-ИИ. Расширение сканирует DOM, присваивает полям временные `Fxx`, формирует безопасный manifest, умеет подготовить PNG-снимок с промптом для ИИ, показывает preview и только после проверки записывает значения в элементы страницы.
 
-## Что реализовано в v0.2.0
+## Что реализовано
 
 - Firefox Manifest V3 и штатная боковая панель;
 - on-demand инъекция content script через `activeTab` + `scripting`;
 - поиск видимых `input`, `textarea`, `select`, contenteditable и основных ARIA controls;
-- Fxx ID со стабильностью в рамках сессии и fallback по fingerprint;
+- Fxx ID со стабильностью в рамках страницы и fallback по fingerprint;
 - same-origin iframe и open Shadow DOM scanner;
 - отслеживание SPA `pushState` / `replaceState` / `popstate` / `hashchange` с `PAGE_CHANGED`;
 - MutationObserver для top document, same-origin iframe и open ShadowRoot без polling;
 - overlay с Fxx без изменения layout страницы;
 - жёлтая/красная overlay-подсветка полей `review/error` без изменения CSS сайта;
 - manifest + `pageFingerprint`;
-- безопасный пакет `Скопировать для GPT` без текущих значений формы;
+- мультимодальный schema-strict промпт без текущих значений формы;
+- встроенный `Снимок + промпт` для ChatGPT / Claude / Gemini и других vision-моделей;
+- временные privacy-маски поверх видимых редактируемых значений на время снимка;
+- копирование PNG в системный clipboard и fallback `Скачать PNG`;
+- многостраничные локальные сессии с `P1-Fxx`, `P2-Fxx` без автоматической навигации;
 - распознавание JSON даже внутри Markdown fences/окружающего текста;
-- строгая схема: только `Fxx`/`I#-Fxx`, selectors отклоняются;
+- строгая схема допустимых идентификаторов, selectors отклоняются;
 - обязательный preview с `ok / review / error / same / skip`;
 - input/textarea/date/select/checkbox/radio/contenteditable;
 - динамический `role=combobox` с ожиданием списка через MutationObserver;
@@ -26,7 +30,7 @@ Firefox WebExtension для заполнения произвольных веб
 - проверка фактического значения после записи;
 - Undo последней операции;
 - локальная история последних 10 операций без сохранения значений;
-- итоговый privacy-safe отчёт для повторной отправки в ChatGPT;
+- privacy-safe отчёт для повторной отправки в ИИ;
 - чувствительные поля блокируются;
 - кнопки и submit намеренно не исполняются.
 
@@ -34,21 +38,30 @@ Firefox WebExtension для заполнения произвольных веб
 
 1. Откройте страницу с формой.
 2. `Alt+Shift+F` — открыть sidebar.
-3. `Alt+Shift+A` или `Анализировать`.
-4. Сделайте скриншот с Fxx.
-5. Нажмите `Скопировать для GPT`, вставьте текст + скриншот + исходные данные в ChatGPT.
-6. Скопируйте JSON из ChatGPT.
-7. `Alt+Shift+V` или `Вставить ответ`.
-8. Проверьте preview.
-9. Нажмите `Заполнить` — однозначные значения будут записаны, неоднозначные останутся нетронутыми для проверки.
-10. При необходимости нажмите `Подсветить проблемные` или `Скопировать отчёт для GPT`.
-11. Самостоятельно проверьте форму и только затем отправляйте её.
+3. Нажмите плавающую кнопку `Снимок + промпт`.
+4. Нажмите `Подготовить снимок и промпт` — расширение само анализирует форму, показывает Fxx/Pn-Fxx, временно закрывает значения полей и снимает видимую область вкладки.
+5. PNG автоматически копируется в clipboard, если Firefox разрешил операцию. Вставьте его в vision-ИИ; при необходимости используйте `Скачать PNG`.
+6. Нажмите `Скопировать промпт` и вставьте его в тот же диалог ИИ вместе с исходными данными, из которых должна быть заполнена форма.
+7. Скопируйте JSON из ответа ИИ.
+8. Вернитесь к форме и нажмите `Alt+Shift+V` или `Вставить ответ`.
+9. Проверьте preview.
+10. Нажмите `Заполнить` — только однозначные значения будут записаны, неоднозначные останутся нетронутыми для проверки.
+11. При необходимости нажмите `Подсветить проблемные` или скопируйте privacy-safe отчёт для ИИ.
+12. Самостоятельно проверьте форму и только затем отправляйте её.
 
-Расширение никогда не нажимает Submit.
+Расширение никогда не нажимает Submit или Next.
+
+### Многостраничные анкеты
+
+После анализа первой страницы можно нажать `Начать сессию`. Текущие поля экспортируются как `P1-Fxx`. После ручного перехода на следующую страницу расширение обнаруживает смену формы и предлагает явно подтвердить `Продолжить текущую сессию`; только после подтверждения новая страница получает namespace `P2-Fxx`.
+
+Автоматический переход между страницами намеренно запрещён.
 
 ## Локальная сборка
 
-Требуется Node.js 22+.
+Требуется Node.js 22+ и Firefox 126+.
+
+Firefox 126 выбран как минимум для безопасного `tabs.captureVisibleTab()` через ограниченный `activeTab`: старые Firefox требовали для этого постоянное разрешение `<all_urls>`, которого проект намеренно не запрашивает.
 
 ```bash
 npm ci
@@ -69,11 +82,13 @@ artifacts/  ZIP, unsigned XPI и SHA256SUMS
 
 Для разработки откройте `about:debugging#/runtime/this-firefox` → `Load Temporary Add-on` → выберите `dist/manifest.json`.
 
+Подробности screenshot handoff: `docs/AI_HANDOFF.md`.
+
 ## CI/CD и скачиваемые артефакты
 
 `.github/workflows/ci.yml` выполняет два последовательных gate:
 
-1. настоящий headless Firefox/Gecko E2E на production `scanner/preview/filler/undo`;
+1. настоящий headless Firefox/Gecko E2E на production `scanner/preview/filler/undo/session`;
 2. `npm ci` → version check → TypeScript/unit tests → Vite build → Mozilla `web-ext lint` → packaging.
 
 Build job зависит от Firefox E2E, поэтому ZIP/XPI не публикуются при браузерной регрессии.
@@ -105,16 +120,20 @@ web-ext sign --channel unlisted
 
 ## Безопасность и приватность
 
-- нет backend и OpenAI API;
+- нет backend и встроенного OpenAI/Anthropic/Google API;
 - расширение не отправляет данные наружу;
 - Firefox manifest явно объявляет `data_collection_permissions.required = ["none"]`;
 - не запрашивает cookies/webRequest/history/downloads;
-- текущие значения полей не включаются в GPT manifest;
+- текущие значения полей не включаются в AI manifest;
+- перед встроенным screenshot текущие значения видимых editable controls временно закрываются privacy-масками;
+- маски снимаются сразу после capture и дополнительно имеют аварийное самоудаление через 15 секунд;
+- cross-origin iframe не обходятся: их содержимое нельзя гарантированно замаскировать, поэтому UI показывает предупреждение;
 - password/OTP/CVV/API token-подобные поля помечаются как защищённые и не заполняются;
-- неизвестный `Fxx` никогда не перенаправляется на другое поле;
-- pageFingerprint и SPA invalidation защищают от применения JSON к другой версии формы;
+- неизвестный Fxx никогда не перенаправляется на другое поле;
+- `pageFingerprint`, SPA invalidation и session namespace защищают от применения JSON к другой странице;
 - fuzzy match ниже 0.95 не приводит к автоматическому выбору;
-- JSON не может инициировать click/submit.
+- JSON не может инициировать click/submit;
+- снимок и промпт пользователь сам передаёт выбранной ИИ-системе.
 
 ## Firefox E2E safety matrix
 
@@ -130,12 +149,20 @@ web-ext sign --channel unlisted
 - duplicate labels;
 - sensitive/password fields;
 - same-origin iframe;
-- open Shadow DOM.
+- open Shadow DOM;
+- явный переход P1 → P2 в многостраничной сессии.
+
+Unit tests дополнительно проверяют AI prompt binding и privacy-mask слой screenshot workflow.
 
 ## Архитектура
 
 ```text
 Sidebar
+   ├─ основной flow: JSON → preview → fill
+   └─ AI handoff: screenshot → prompt → clipboard
+             │
+             ├─ tabs.captureVisibleTab
+             └─ temporary capture-mask.js
    │ runtime.sendMessage
    ▼
 Background
@@ -152,8 +179,8 @@ Content script
 DOM
 ```
 
-GPT определяет **что** записать. Расширение определяет **куда и как** это записать в DOM.
+ИИ определяет **что** записать. Расширение детерминированно определяет **куда и как** записать это в DOM.
 
 ## Статус
 
-`v0.2.0` — hardened MVP: Firefox E2E gate, безопасные пороги сопоставления, runtime для SPA/iframe/Shadow DOM, улучшенный sidebar/reporting и воспроизводимый CI/CD release pipeline.
+`main` содержит hardened MVP v0.2.0 плюс многостраничные сессии и встроенный screenshot → vision-AI handoff. Следующий релизный тег создаётся отдельно после зелёного CI и финального Firefox smoke-test.
