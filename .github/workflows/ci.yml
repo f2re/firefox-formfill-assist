@@ -2,7 +2,7 @@ name: CI / Firefox artifact
 
 on:
   push:
-    branches: ["main", "feat/**", "fix/**"]
+    branches: ["main", "feat/**", "fix/**", "agent/**"]
   pull_request:
   workflow_dispatch:
 
@@ -10,7 +10,41 @@ permissions:
   contents: read
 
 jobs:
+  firefox-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright Firefox
+        run: npx playwright install --with-deps firefox
+
+      - name: Firefox E2E safety matrix
+        run: npm run test:e2e
+
+      - name: Upload E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: firefox-e2e-diagnostics-${{ github.sha }}
+          path: |
+            playwright-report/**
+            test-results/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   build:
+    needs: firefox-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
