@@ -7,14 +7,10 @@ on:
       - "package.json"
       - "package-lock.json"
       - "src/manifest.json"
-      - ".github/workflows/release.yml"
   workflow_dispatch:
-  issues:
-    types: ["opened"]
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: firefox-release-${{ github.ref }}
@@ -36,8 +32,6 @@ jobs:
       - name: Resolve release version
         id: meta
         shell: bash
-        env:
-          ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
@@ -46,10 +40,6 @@ jobs:
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             RELEASE_NEEDED=true
-          elif [[ "${GITHUB_EVENT_NAME}" == "issues" ]]; then
-            if [[ "${ISSUE_TITLE}" == "[release] ${TAG}" ]]; then
-              RELEASE_NEEDED=true
-            fi
           else
             PREVIOUS_VERSION=$(git show "${GITHUB_SHA}^:package.json" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>console.log(JSON.parse(s).version));")
             if [[ "${PREVIOUS_VERSION}" != "${VERSION}" ]]; then
@@ -61,13 +51,6 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "release_needed=${RELEASE_NEEDED}" >> "$GITHUB_OUTPUT"
           echo "Release candidate: ${TAG}; needed=${RELEASE_NEEDED}"
-
-      - name: Mark release trigger accepted
-        if: github.event_name == 'issues' && steps.meta.outputs.release_needed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E and gated build. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
   firefox-e2e:
     needs: prepare
@@ -196,23 +179,3 @@ jobs:
           files: |
             artifacts/*
             signed/*
-
-      - name: Mark issue release published
-        if: github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "Published ${RELEASE_TAG}: Firefox E2E, checks, lint, deterministic packaging and GitHub Release completed. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
-  notify-failure:
-    needs: [prepare, firefox-e2e, release]
-    if: always() && github.event_name == 'issues' && needs.prepare.outputs.release_needed == 'true' && needs.release.result != 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Report failed release gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          E2E_RESULT: ${{ needs.firefox-e2e.result }}
-          RELEASE_RESULT: ${{ needs.release.result }}
-        run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "Release ${{ needs.prepare.outputs.tag }} did not publish. Firefox E2E: ${E2E_RESULT}; release job: ${RELEASE_RESULT}. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
