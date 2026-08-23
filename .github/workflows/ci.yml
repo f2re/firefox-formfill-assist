@@ -74,6 +74,12 @@ jobs:
       - name: Package ZIP and XPI
         run: npm run package
 
+      - name: Verify reproducible package bytes
+        run: |
+          cp artifacts/SHA256SUMS /tmp/formfill-first-SHA256SUMS
+          npm run package
+          diff -u /tmp/formfill-first-SHA256SUMS artifacts/SHA256SUMS
+
       - name: Upload Firefox build
         uses: actions/upload-artifact@v7
         with:
