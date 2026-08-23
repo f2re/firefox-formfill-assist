@@ -50,13 +50,15 @@ describe("makeGptPacket", () => {
     expect(prompt).toContain("JSON.parse");
     expect(prompt).toContain('"options": [');
     expect(prompt).toContain('"readonly": true');
+    expect(prompt).toContain('"fields": {}');
   });
 
-  it("does not leak sensitive labels or URL query values", () => {
+  it("does not leak sensitive labels, URL query values, or fake fill values", () => {
     const prompt = makeGptPacket(manifest());
 
     expect(prompt).not.toContain("Пароль");
     expect(prompt).toContain("Защищённое поле");
     expect(prompt).not.toContain("private=query");
+    expect(prompt).not.toContain("пример текстового значения");
   });
 });
