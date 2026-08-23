@@ -160,15 +160,23 @@ jobs:
             sha256sum ./* > SHA256SUMS
           )
 
-      - name: Create immutable release tag
+      - name: Create or verify immutable release tag
         shell: bash
         run: |
           set -euo pipefail
           REMOTE_SHA=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')
+
           if [[ -n "${REMOTE_SHA}" && "${REMOTE_SHA}" != "${GITHUB_SHA}" ]]; then
-            echo "Tag ${RELEASE_TAG} already exists on ${REMOTE_SHA}, refusing to retag ${GITHUB_SHA}." >&2
-            exit 1
+            NON_WORKFLOW_DIFF=$(git diff --name-only "${REMOTE_SHA}" "${GITHUB_SHA}" -- . ':(exclude).github/workflows/release.yml')
+            if [[ -n "${NON_WORKFLOW_DIFF}" ]]; then
+              echo "Tag ${RELEASE_TAG} already exists on ${REMOTE_SHA}; current ${GITHUB_SHA} also changes release payload files:" >&2
+              echo "${NON_WORKFLOW_DIFF}" >&2
+              echo "Refusing to retag or publish mismatched artifacts." >&2
+              exit 1
+            fi
+            echo "Tag ${RELEASE_TAG} already points to ${REMOTE_SHA}; current commit differs only in release workflow. Reusing immutable tag."
           fi
+
           if [[ -z "${REMOTE_SHA}" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -190,7 +198,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          target_commitish: ${{ github.sha }}
           name: FormFill Assistant ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           fail_on_unmatched_files: false
