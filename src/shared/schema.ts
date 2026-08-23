@@ -8,10 +8,12 @@ const operation = z.object({
   value: primitive.optional(),
 });
 
+const fieldIdPattern = /^(?:F\d{2,}|I\d+-F\d{2,}|P\d+-F\d{2,})$/;
+
 export const fillRequestSchema = z.object({
   version: z.literal(1),
   pageFingerprint: z.string().min(1).optional(),
-  fields: z.record(z.string().regex(/^F\d{2,}$|^I\d+-F\d{2,}$/), z.union([primitive, operation])),
+  fields: z.record(z.string().regex(fieldIdPattern), z.union([primitive, operation])),
 });
 
 export class FillRequestParseError extends Error {
