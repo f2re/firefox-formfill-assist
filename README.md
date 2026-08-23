@@ -1,62 +1,152 @@
-# Firefox FormFill Assistant
+<p align="center">
+  <img src="src/icons/formfill.svg" width="128" alt="FormFill Assistant icon" />
+</p>
 
-Firefox WebExtension для безопасного заполнения произвольных веб-форм по JSON, подготовленному vision-ИИ. Расширение сканирует DOM, присваивает полям временные `Fxx`, формирует безопасный manifest, умеет подготовить PNG-снимок с промптом для ИИ, показывает preview и только после проверки записывает значения в элементы страницы.
+<h1 align="center">FormFill Assistant</h1>
 
-## Что реализовано
+<p align="center">
+  Безопасный Firefox WebExtension для заполнения сложных веб-форм с помощью vision-ИИ.<br/>
+  <strong>Снимок → строгий промпт → JSON → preview → заполнение. Без auto-submit.</strong>
+</p>
 
-- Firefox Manifest V3 и штатная боковая панель;
-- on-demand инъекция content script через `activeTab` + `scripting`;
-- поиск видимых `input`, `textarea`, `select`, contenteditable и основных ARIA controls;
-- Fxx ID со стабильностью в рамках страницы и fallback по fingerprint;
-- same-origin iframe и open Shadow DOM scanner;
-- отслеживание SPA `pushState` / `replaceState` / `popstate` / `hashchange` с `PAGE_CHANGED`;
-- MutationObserver для top document, same-origin iframe и open ShadowRoot без polling;
-- overlay с Fxx без изменения layout страницы;
-- жёлтая/красная overlay-подсветка полей `review/error` без изменения CSS сайта;
-- manifest + `pageFingerprint`;
-- мультимодальный schema-strict промпт без текущих значений формы;
-- встроенный `Снимок + промпт` для ChatGPT / Claude / Gemini и других vision-моделей;
-- временные privacy-маски поверх видимых редактируемых значений на время снимка;
-- копирование PNG в системный clipboard и fallback `Скачать PNG`;
-- многостраничные локальные сессии с `P1-Fxx`, `P2-Fxx` без автоматической навигации;
-- сохранение iframe identity внутри сессии: `I1-F02` → `P1-I1-F02`;
-- распознавание JSON даже внутри Markdown fences/окружающего текста;
-- строгая схема допустимых идентификаторов, selectors отклоняются;
-- обязательный preview с `ok / review / error / same / skip`;
-- input/textarea/date/select/checkbox/radio/contenteditable;
-- динамический `role=combobox` с ожиданием списка через MutationObserver;
-- native setters + `input/change/focus/blur` для controlled inputs;
-- пороги fuzzy matching: auto ≥ 0.95, review 0.75–0.95, error < 0.75;
-- значения в review-band автоматически не записываются;
-- проверка фактического значения после записи;
-- Undo последней операции;
-- локальная история последних 10 операций без сохранения значений;
-- privacy-safe отчёт для повторной отправки в ИИ;
-- чувствительные поля блокируются;
-- кнопки и submit намеренно не исполняются.
+<p align="center">
+  <a href="README.md">Русский</a> ·
+  <a href="README.en.md">English</a> ·
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## Быстрый сценарий
+<p align="center">
+  <a href="https://github.com/f2re/firefox-formfill-assist/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/f2re/firefox-formfill-assist/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/f2re/firefox-formfill-assist/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/f2re/firefox-formfill-assist?display_name=tag" /></a>
+  <img alt="Firefox 126+" src="https://img.shields.io/badge/Firefox-126%2B-7c4dff" />
+  <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-16a085" />
+  <img alt="No auto submit" src="https://img.shields.io/badge/auto--submit-never-176ff2" />
+</p>
 
-1. Откройте страницу с формой.
-2. `Alt+Shift+F` — открыть sidebar.
-3. Нажмите плавающую кнопку `Снимок + промпт`.
-4. Нажмите `Подготовить снимок и промпт` — расширение само анализирует форму, показывает Fxx/Pn-Fxx, временно закрывает значения полей и снимает видимую область вкладки.
-5. PNG автоматически копируется в clipboard, если Firefox разрешил операцию. Вставьте его в vision-ИИ; при необходимости используйте `Скачать PNG`.
-6. Нажмите `Скопировать промпт` и вставьте его в тот же диалог ИИ вместе с исходными данными, из которых должна быть заполнена форма.
-7. Скопируйте JSON из ответа ИИ.
-8. Вернитесь к форме и нажмите `Alt+Shift+V` или `Вставить ответ`.
-9. Проверьте preview.
-10. Нажмите `Заполнить` — только однозначные значения будут записаны, неоднозначные останутся нетронутыми для проверки.
-11. При необходимости нажмите `Подсветить проблемные` или скопируйте privacy-safe отчёт для ИИ.
-12. Самостоятельно проверьте форму и только затем отправляйте её.
+---
 
-Расширение никогда не нажимает Submit или Next.
+## Зачем это нужно
 
-## Готовый промпт для ИИ
+Обычный ИИ хорошо понимает скриншот формы, но плохо знает, **куда именно** записывать каждое значение в живом DOM. FormFill Assistant разделяет эти задачи:
 
-Основной и самый безопасный вариант — использовать кнопку `Скопировать промпт`: расширение автоматически подставляет актуальные `Fxx/I<n>-Fxx/P<n>-Fxx`, `pageFingerprint`, типы полей, `options` и текущий `[FORM_MANIFEST]`.
+- **ИИ решает, что заполнить** — по скриншоту, документам и данным пользователя;
+- **расширение решает, куда и как записать** — по стабильным `Fxx`-идентификаторам, типам полей и текущему `pageFingerprint`;
+- перед записью всегда показывается **обязательный preview**;
+- пароль, OTP, CVV, API token и другие чувствительные поля блокируются;
+- расширение никогда не нажимает `Submit`, `Next` и другие кнопки отправки.
 
-Для ручного режима, внешнего vision-ИИ или собственной интеграции используйте универсальный шаблон ниже. Заменять нужно только содержимое `[FORM_MANIFEST]` на реальный manifest текущей формы. Не придумывайте идентификаторы и `pageFingerprint` вручную. Этот блок формируется тем же контрактом, что и рабочий prompt расширения (`makePortableAiPromptTemplate()` / `makeGptPacket()`), а unit-test не даёт README разойтись с кодом.
+Это не «агент, который сам кликает сайт». Это контролируемый конвейер преобразования данных в конкретные поля формы.
+
+## Как это выглядит
+
+<p align="center">
+  <img src="docs/assets/workflow.svg" alt="FormFill Assistant workflow" width="100%" />
+</p>
+
+### Основной flow
+
+1. Откройте форму и sidebar FormFill Assistant.
+2. Нажмите **«Анализировать»** — поля получат `F01`, `F02`, `I1-F03` и т. п.
+3. Нажмите **«Снимок + промпт»** → **«Подготовить снимок и промпт»**.
+4. Расширение временно маскирует текущие значения editable-полей и делает PNG видимой области.
+5. Вставьте PNG в ChatGPT / Claude / Gemini / другой vision-ИИ.
+6. Нажмите **«Скопировать промпт»** и вставьте его в тот же диалог.
+7. ИИ возвращает только строгий JSON.
+8. В sidebar нажмите **«Вставить ответ»** и проверьте preview.
+9. Нажмите **«Заполнить»** — только однозначные и разрешённые значения попадут в DOM.
+10. Самостоятельно проверьте страницу и вручную нажмите Submit, если всё корректно.
+
+> **Ключевая гарантия:** JSON не может приказать расширению нажать кнопку, выполнить JavaScript, использовать CSS/XPath selector или отправить форму.
+
+## Быстрый старт
+
+### 1. Установка
+
+Скачайте последнюю сборку в [GitHub Releases](https://github.com/f2re/firefox-formfill-assist/releases/latest).
+
+Для обычного Firefox нужен **подписанный XPI**. Release pipeline умеет получать подпись Mozilla AMO автоматически при наличии repository secrets. Настройка описана в [`docs/FIREFOX_SIGNING.md`](docs/FIREFOX_SIGNING.md).
+
+Для разработки можно загрузить unsigned XPI или `dist/manifest.json` через:
+
+```text
+about:debugging#/runtime/this-firefox
+→ Load Temporary Add-on
+```
+
+### 2. Открыть sidebar
+
+- `Alt+Shift+F` — открыть FormFill Assistant;
+- `Alt+Shift+A` — анализировать текущую форму;
+- `Alt+Shift+V` — вставить JSON из буфера;
+- `Alt+Shift+E` — заполнить после preview.
+
+### 3. Передать форму ИИ
+
+Самый безопасный вариант — использовать встроенную кнопку **«Снимок + промпт»**. Она автоматически связывает screenshot, manifest и `pageFingerprint` одной конкретной версии страницы.
+
+## Что умеет расширение
+
+| Возможность | Поведение |
+|---|---|
+| Обычные поля | `input`, `textarea`, `date`, `number`, `email`, `tel`, `contenteditable` |
+| Выбор | native `select`, radio, ARIA combobox/autocomplete |
+| Controlled UI | native setters + `input/change/focus/blur` для React/Vue-style controls |
+| Iframe | same-origin iframe сканируются и получают `I<n>-Fxx` |
+| Shadow DOM | open ShadowRoot поддерживается |
+| SPA | `pushState`, `replaceState`, `popstate`, `hashchange` → `PAGE_CHANGED` |
+| Динамические формы | MutationObserver без polling |
+| Сопоставление | auto ≥ 0.95, review 0.75–0.95, ниже — без автоматической записи |
+| Много страниц | ручные сессии `P1-Fxx`, `P2-Fxx`; iframe → `P1-I1-F02` |
+| Undo | последняя операция откатывается с событиями DOM |
+| История | последние операции без сохранения значений |
+| Sensitive fields | password / OTP / CVV / token-like поля блокируются |
+| Submit | никогда не выполняется автоматически |
+
+## Почему screenshot безопаснее обычного скриншота
+
+Перед встроенным capture расширение накладывает временные privacy-маски поверх видимых editable controls. Значения DOM не меняются — маска существует только поверх страницы во время снимка и удаляется сразу после capture. Дополнительно есть аварийное самоудаление.
+
+Cross-origin iframe браузер не позволяет безопасно прочитать и замаскировать. В таком случае UI показывает явное предупреждение, чтобы пользователь проверил PNG перед передачей ИИ.
+
+## JSON-контракт
+
+Минимальный ответ ИИ:
+
+```json
+{
+  "version": 1,
+  "pageFingerprint": "...",
+  "fields": {}
+}
+```
+
+Пример заполнения:
+
+```json
+{
+  "version": 1,
+  "pageFingerprint": "fp-current-page",
+  "fields": {
+    "F01": "Иванов",
+    "F02": {
+      "action": "select",
+      "value": "Москва"
+    },
+    "F03": {
+      "action": "check"
+    }
+  }
+}
+```
+
+Поддерживаемые операции: `set`, `select`, `check`, `uncheck`, `clear`, `skip`. Неизвестное значение должно **отсутствовать** в `fields`, а не заменяться `null`, `""`, `false` или `0`.
+
+## Готовый универсальный промпт для ИИ
+
+Для текущей формы предпочтительнее встроенная кнопка **«Скопировать промпт»** — она подставляет реальный manifest автоматически. Универсальный шаблон нужен для внешней интеграции или ручного workflow.
+
+<details>
+<summary><strong>Показать полный копируемый промпт</strong></summary>
 
 <!-- FORM_FILL_AI_PROMPT:START -->
 ```text
@@ -115,40 +205,69 @@ Firefox WebExtension для безопасного заполнения прои
 ```
 <!-- FORM_FILL_AI_PROMPT:END -->
 
-Пример **структуры** корректного ответа (значения ниже только демонстрационные; реальные `id`, `pageFingerprint` и значения всегда берутся из текущей формы и данных пользователя):
+</details>
 
-```json
-{
-  "version": 1,
-  "pageFingerprint": "fp-current-page",
-  "fields": {
-    "F01": "Иванов",
-    "F02": {
-      "action": "select",
-      "value": "Москва"
-    },
-    "F03": {
-      "action": "check"
-    }
-  }
-}
+Текст между маркерами синхронизирован с runtime функцией `makePortableAiPromptTemplate()`. Unit test сравнивает README и код byte-for-byte, поэтому документация не может незаметно разойтись с реальным контрактом.
+
+## Многостраничные формы
+
+Сессия включается явно. Расширение не нажимает «Далее» само.
+
+```text
+Страница 1: F01       → P1-F01
+Iframe 1:   I1-F02    → P1-I1-F02
+Страница 2: F01       → P2-F01
 ```
 
-Для неизвестного поля ключ полностью отсутствует. Для `select/radio/combobox` предпочтительна операция `select`; для checkbox — `check/uncheck`. Любой ответ всё равно проходит parser и обязательный preview перед записью в DOM.
+После ручного перехода на следующую страницу расширение обнаруживает новый fingerprint и предлагает **«Продолжить текущую сессию»**. Без подтверждения новая страница не принимается.
 
-### Многостраничные анкеты
+## Архитектура
 
-После анализа первой страницы можно нажать `Начать сессию`. Текущие поля экспортируются как `P1-Fxx`. После ручного перехода на следующую страницу расширение обнаруживает смену формы и предлагает явно подтвердить `Продолжить текущую сессию`; только после подтверждения новая страница получает namespace `P2-Fxx`.
+```text
+Sidebar
+  ├─ Analyze / Fxx overlay
+  ├─ AI handoff
+  │    ├─ temporary privacy masks
+  │    ├─ captureVisibleTab()
+  │    └─ strict prompt + FORM_MANIFEST
+  ├─ JSON parser
+  ├─ mandatory preview
+  └─ result / undo / report
+        │
+        ▼
+Background
+        │ tabs.sendMessage / scripting.executeScript
+        ▼
+Content runtime
+  ├─ scanner + fingerprint
+  ├─ iframe / Shadow DOM / SPA observers
+  ├─ matcher / combobox adapter
+  ├─ filler + native events
+  └─ undo
+        │
+        ▼
+       DOM
+```
 
-Поля внутри same-origin iframe сохраняют полный namespace: например `I1-F02` на первой странице экспортируется как `P1-I1-F02` и безопасно нормализуется обратно перед заполнением.
+## Безопасность
 
-Автоматический переход между страницами намеренно запрещён.
+- backend отсутствует;
+- встроенных OpenAI / Anthropic / Google API нет;
+- telemetry и analytics отсутствуют;
+- текущие значения формы не включаются в manifest;
+- screenshot отправляет выбранному ИИ только пользователь;
+- prompt injection из labels/options рассматривается как недоверенный текст формы;
+- unknown `Fxx` не перенаправляется на «похожее» поле;
+- fingerprint mismatch блокирует применение ответа к другой странице;
+- `review`-значения автоматически не записываются;
+- sensitive controls не являются target для заполнения;
+- submit/click/navigation отсутствуют в JSON API.
 
-## Локальная сборка
+Подробнее: [`SECURITY.md`](SECURITY.md).
 
-Требуется Node.js 22+ и Firefox 126+.
+## Разработка
 
-Firefox 126 выбран как минимум для безопасного `tabs.captureVisibleTab()` через ограниченный `activeTab`: старые Firefox требовали для этого постоянное разрешение `<all_urls>`, которого проект намеренно не запрашивает.
+Требуются Node.js 22+ и Firefox 126+.
 
 ```bash
 npm ci
@@ -158,116 +277,56 @@ npm run lint:extension
 npm run package
 ```
 
-Результат:
-
-```text
-dist/       распакованное расширение
-artifacts/  ZIP, unsigned XPI и SHA256SUMS
-```
-
-`package-lock.json` хранится в репозитории, поэтому CI и локальная чистая сборка используют один dependency graph.
-
-Для разработки откройте `about:debugging#/runtime/this-firefox` → `Load Temporary Add-on` → выберите `dist/manifest.json`.
-
-Подробности screenshot handoff: `docs/AI_HANDOFF.md`.
-
-## CI/CD и скачиваемые артефакты
-
-`.github/workflows/ci.yml` выполняет два последовательных gate:
-
-1. настоящий headless Firefox/Gecko E2E на production `scanner/preview/filler/undo/session`;
-2. `npm ci` → version check → TypeScript/unit tests → Vite build → Mozilla `web-ext lint` → packaging.
-
-Build job зависит от Firefox E2E, поэтому ZIP/XPI не публикуются при браузерной регрессии.
-
-Упаковщик создаёт детерминированный ZIP/XPI: список файлов сортируется, ZIP metadata фиксируется, после чего CI запускает упаковку второй раз и сравнивает `SHA256SUMS` byte-for-byte. В artifact входят:
-
-```text
-formfill_assistant-X.Y.Z.zip
-firefox-formfill-assist-X.Y.Z-unsigned.xpi
-SHA256SUMS
-```
-
-`.github/workflows/release.yml` выпускает новую версию при изменении `package.json` в `main`. Workflow вычисляет `vX.Y.Z`, прогоняет Firefox E2E, typecheck/unit tests, сборку, Mozilla lint и reproducibility check, после чего создаёт неизменяемый Git tag и GitHub Release с ZIP/XPI/checksums. Повторный запуск для существующего тега допускается только если тег указывает на тот же commit; перенос существующего релизного тега запрещён.
-
-### Постоянно устанавливаемый XPI для обычного Firefox
-
-Обычный Firefox требует подпись расширения. Для автоматической AMO-подписи добавьте repository secrets:
-
-- `WEB_EXT_API_KEY` — AMO API key / JWT issuer;
-- `WEB_EXT_API_SECRET` — AMO API secret.
-
-После этого release workflow выполняет:
+Firefox E2E:
 
 ```bash
-web-ext sign --channel unlisted
+npx playwright install firefox
+npm run test:e2e
 ```
 
-и прикладывает подписанный XPI и отдельный `signed/SHA256SUMS`. Без этих secrets workflow создаёт проверенный unsigned XPI для `about:debugging` и разработки, но он не считается постоянно устанавливаемым релизом обычного Firefox.
-
-## Безопасность и приватность
-
-- нет backend и встроенного OpenAI/Anthropic/Google API;
-- расширение не отправляет данные наружу;
-- Firefox manifest явно объявляет `data_collection_permissions.required = ["none"]`;
-- не запрашивает cookies/webRequest/history/downloads;
-- текущие значения полей не включаются в AI manifest;
-- перед встроенным screenshot текущие значения видимых editable controls временно закрываются privacy-масками;
-- маски снимаются сразу после capture и дополнительно имеют аварийное самоудаление через 15 секунд;
-- cross-origin iframe не обходятся: их содержимое нельзя гарантированно замаскировать, поэтому UI показывает предупреждение;
-- password/OTP/CVV/API token-подобные поля помечаются как защищённые и не заполняются;
-- неизвестный Fxx никогда не перенаправляется на другое поле;
-- `pageFingerprint`, SPA invalidation и session namespace защищают от применения JSON к другой странице;
-- fuzzy match ниже 0.95 не приводит к автоматическому выбору;
-- JSON не может инициировать click/submit;
-- снимок и промпт пользователь сам передаёт выбранной ИИ-системе.
-
-## Firefox E2E safety matrix
-
-В CI на реальном Gecko проверяются как минимум:
-
-- text/date/select/checkbox/radio и post-fill readback;
-- отсутствие submit и submit-button click;
-- unknown Fxx;
-- pageFingerprint mismatch;
-- controlled input events;
-- динамически появляющиеся зависимые поля;
-- Undo;
-- duplicate labels;
-- sensitive/password fields;
-- same-origin iframe;
-- open Shadow DOM;
-- явный переход P1 → P2 в многостраничной сессии.
-
-Unit tests дополнительно проверяют AI prompt binding, page-qualified iframe IDs, синхронность копируемого README-промпта и privacy-mask слой screenshot workflow.
-
-## Архитектура
+Сборка создаёт:
 
 ```text
-Sidebar
-   ├─ основной flow: JSON → preview → fill
-   └─ AI handoff: screenshot → prompt → clipboard
-             │
-             ├─ tabs.captureVisibleTab
-             └─ temporary capture-mask.js
-   │ runtime.sendMessage
-   ▼
-Background
-   │ tabs.sendMessage / scripting.executeScript
-   ▼
-Content script
-   ├─ scanner / labels / fingerprint
-   ├─ iframe / Shadow DOM / SPA observation
-   ├─ overlay / problem highlights
-   ├─ preview / matcher
-   ├─ filler / native events / undo
-   └─ MutationObserver
-   ▼
-DOM
+dist/
+artifacts/formfill_assistant-X.Y.Z.zip
+artifacts/firefox-formfill-assist-X.Y.Z-unsigned.xpi
+artifacts/SHA256SUMS
 ```
 
-ИИ определяет **что** записать. Расширение детерминированно определяет **куда и как** записать это в DOM.
+## CI/CD и подписанные релизы
 
-## Статус
+`ci.yml` проверяет Firefox E2E до публикации build artifact. `release.yml` повторяет gates, проверяет reproducible packaging и требует AMO credentials для production release.
 
-`v0.3.0` — screenshot/vision-AI handoff, многостраничные `Pn-Fxx` сессии, сохранение iframe identity, hardened prompt contract и воспроизводимый gated release pipeline.
+Нужны GitHub Actions secrets:
+
+```text
+WEB_EXT_API_KEY     = AMO JWT issuer
+WEB_EXT_API_SECRET  = AMO JWT secret
+```
+
+После этого pipeline выполняет `web-ext sign --channel unlisted` и прикладывает подписанный XPI к GitHub Release. Без этих secrets production release намеренно считается неуспешным.
+
+Подробная инструкция: [`docs/FIREFOX_SIGNING.md`](docs/FIREFOX_SIGNING.md).
+
+## Документация
+
+- [`README.en.md`](README.en.md) — English;
+- [`README.zh-CN.md`](README.zh-CN.md) — 简体中文;
+- [`docs/AI_HANDOFF.md`](docs/AI_HANDOFF.md) — screenshot/prompt handoff;
+- [`docs/FIREFOX_SIGNING.md`](docs/FIREFOX_SIGNING.md) — Mozilla AMO signing;
+- [`SECURITY.md`](SECURITY.md) — security model;
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guide.
+
+## Принципы проекта
+
+**Deterministic over magical.** ИИ не управляет браузером напрямую. Он формирует данные, а расширение применяет их только через явный контракт, fingerprint и preview.
+
+**Private by default.** Нет сервера, telemetry и скрытой передачи данных.
+
+**User stays in control.** Ни навигация, ни submit не выполняются автоматически.
+
+---
+
+<p align="center">
+  <strong>FormFill Assistant</strong> — AI decides <em>what</em> to fill. The extension decides <em>where and how</em>.
+</p>
