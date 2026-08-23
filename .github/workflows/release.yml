@@ -176,11 +176,13 @@ jobs:
             exit 1
           fi
           test -s "${SIGNED_XPI[0]}"
+          FRIENDLY_XPI="signed/firefox-formfill-assist-${RELEASE_VERSION}-signed.xpi"
+          mv "${SIGNED_XPI[0]}" "${FRIENDLY_XPI}"
           (
             cd signed
-            sha256sum ./*.xpi > SHA256SUMS
+            sha256sum "firefox-formfill-assist-${RELEASE_VERSION}-signed.xpi" > SHA256SUMS
           )
-          echo "AMO signed XPI: ${SIGNED_XPI[0]}"
+          echo "AMO signed XPI: ${FRIENDLY_XPI}"
 
       - name: Create or verify immutable release tag
         shell: bash
@@ -191,7 +193,8 @@ jobs:
           if [[ -n "${REMOTE_SHA}" && "${REMOTE_SHA}" != "${GITHUB_SHA}" ]]; then
             NON_RELEASE_DIFF=$(git diff --name-only "${REMOTE_SHA}" "${GITHUB_SHA}" -- . \
               ':(exclude).github/workflows/release.yml' \
-              ':(exclude)docs/**')
+              ':(exclude)docs/**' \
+              ':(exclude)CHANGELOG.md')
             if [[ -n "${NON_RELEASE_DIFF}" ]]; then
               echo "Tag ${RELEASE_TAG} already exists on ${REMOTE_SHA}; current ${GITHUB_SHA} also changes release payload files:" >&2
               echo "${NON_RELEASE_DIFF}" >&2
