@@ -18,6 +18,14 @@ describe("GPT JSON parser", () => {
     expect(result.fields.F01).toBe(12);
   });
 
+  it("accepts iframe IDs both normally and inside a page namespace", () => {
+    const result = parseFillRequest(
+      '{"version":1,"fields":{"I1-F02":"обычное","P3-I2-F04":"сессия"}}',
+    );
+    expect(result.fields["I1-F02"]).toBe("обычное");
+    expect(result.fields["P3-I2-F04"]).toBe("сессия");
+  });
+
   it("rejects selectors instead of Fxx IDs", () => {
     expect(() =>
       parseFillRequest('{"version":1,"fields":{"#app input":"Иванов"}}'),
