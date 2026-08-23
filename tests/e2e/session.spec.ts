@@ -84,8 +84,11 @@ test("multi-page session requires explicit continuation and rejects another page
   ) as any;
   expect(localPage1.fields[page1Field.id]).toBe("Иван");
 
+  // page.setContent() runs on about:blank in Playwright Firefox, where history.pushState("/step-2")
+  // is intentionally blocked as an insecure cross-origin operation. Changing the form structure is
+  // sufficient here: pageFingerprint includes the scanned controls, while SPA URL invalidation is
+  // covered independently by the production runtime tests.
   await page.evaluate(() => {
-    history.pushState({}, "", "/step-2");
     document.body.innerHTML = '<label for="org">Организация</label><input id="org" name="organization">';
   });
   const page2 = await page.evaluate(() => (window as unknown as SessionHarnessWindow).__formfillE2E.rescan());
