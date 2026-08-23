@@ -3,7 +3,16 @@
   "name": "FormFill Assistant",
   "short_name": "FormFill",
   "version": "0.3.1",
-  "description": "Заполняет веб-формы по проверенному Fxx JSON и готовит снимок с промптом для vision-ИИ без автоматической отправки формы.",
+  "description": "Безопасно готовит screenshot + prompt для vision-ИИ, проверяет строгий Fxx JSON и заполняет веб-формы только после preview — без auto-submit.",
+  "author": "f2re",
+  "homepage_url": "https://github.com/f2re/firefox-formfill-assist",
+  "icons": {
+    "16": "icons/formfill.svg",
+    "32": "icons/formfill.svg",
+    "48": "icons/formfill.svg",
+    "96": "icons/formfill.svg",
+    "128": "icons/formfill.svg"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "firefox-formfill-assist@f2re.github",
