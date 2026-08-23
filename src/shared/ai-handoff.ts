@@ -57,7 +57,7 @@ export function planAiHandoff(manifest: FormManifest, session?: FormSession | nu
     pageFingerprint: manifest.pageFingerprint,
     fieldCount: manifest.fields.length,
     pageNumber: page.pageNumber,
-    fieldNamespace: `P${page.pageNumber}-Fxx`,
+    fieldNamespace: `P${page.pageNumber}-Fxx / P${page.pageNumber}-I<n>-Fxx`,
   };
 }
 
