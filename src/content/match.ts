@@ -1,5 +1,6 @@
 import { bestTextMatch, normalizeText } from "../shared/normalize";
 import { isInput } from "./dom";
+import { getElementLabel } from "./labels";
 
 export const AUTO_MATCH_THRESHOLD = 0.95;
 export const REVIEW_MATCH_THRESHOLD = 0.75;
@@ -47,10 +48,8 @@ export function matchRadioOption(elements: HTMLElement[], requested: unknown): {
     (element): element is HTMLInputElement => isInput(element) && element.type === "radio",
   );
   const labels = radios.map((radio) => {
-    const explicit = radio.id
-      ? radio.ownerDocument.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(radio.id)}"]`)
-      : null;
-    return explicit?.textContent?.trim() || radio.value;
+    const label = getElementLabel(radio);
+    return label && label !== "Поле без подписи" ? label : radio.value;
   });
 
   const best = bestTextMatch(requested, labels);
