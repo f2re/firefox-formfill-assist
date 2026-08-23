@@ -13,6 +13,7 @@ import { scanDocument } from "./scanner";
 import { readValue, setChecked, setContentEditable, setInputValue, setSelectValue } from "./values";
 import { formatDateForElement, matchRadioOption, matchSelectOption } from "./match";
 import { fillCombobox } from "./combobox";
+import { isInput, isSelect, isTextArea } from "./dom";
 
 interface UndoSnapshot {
   id: string;
@@ -61,26 +62,37 @@ async function applyOne(state: ScanState, id: string, raw: PrimitiveFillValue | 
   const element = handle.elements[0];
   if (!element) return { id, label: handle.descriptor.label, status: "error", message: "DOM element исчез." };
 
+  let expectedActual: PrimitiveFillValue = value;
+  let verificationOverride: boolean | null = null;
+  let verificationMessage: string | undefined;
+
   try {
     if (handle.descriptor.type === "checkbox") {
-      if (!(element instanceof HTMLInputElement)) {
+      if (!isInput(element)) {
         return { id, label: handle.descriptor.label, status: "error", message: "ARIA checkbox пока не поддержан для записи." };
       }
-      setChecked(element, action === "uncheck" ? false : action === "check" ? true : booleanValue(value));
+      const checked = action === "uncheck" ? false : action === "check" ? true : booleanValue(value);
+      setChecked(element, checked);
+      expectedActual = checked;
     } else if (handle.descriptor.type === "radio") {
       const match = matchRadioOption(handle.elements, value);
       if (!match || match.confidence < 0.75) {
         return { id, label: handle.descriptor.label, status: "review", requestedValue: value, message: "Radio-вариант неоднозначен." };
       }
       setChecked(match.element, true);
-    } else if (element instanceof HTMLSelectElement) {
+      expectedActual = match.label;
+    } else if (isSelect(element)) {
       const match = matchSelectOption(element, value);
       if (!match || match.confidence < 0.75) {
         return { id, label: handle.descriptor.label, status: "review", requestedValue: value, message: "Select-вариант неоднозначен." };
       }
       setSelectValue(element, match.value);
+      expectedActual = match.value;
     } else if (handle.descriptor.type === "combobox") {
       const result = await fillCombobox(element, String(value ?? ""));
+      verificationOverride = result.ok;
+      verificationMessage = result.message;
+      expectedActual = result.actual ?? result.expected ?? value;
       if (!result.ok) {
         return {
           id,
@@ -91,24 +103,23 @@ async function applyOne(state: ScanState, id: string, raw: PrimitiveFillValue | 
           message: result.message,
         };
       }
-    } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    } else if (isInput(element) || isTextArea(element)) {
       const text =
         handle.descriptor.type === "date"
           ? formatDateForElement(element, String(value ?? ""))
           : String(value ?? "");
       setInputValue(element, text);
+      expectedActual = text;
     } else if (element.isContentEditable) {
-      setContentEditable(element, String(value ?? ""));
+      const text = String(value ?? "");
+      setContentEditable(element, text);
+      expectedActual = text;
     } else {
       return { id, label: handle.descriptor.label, status: "error", message: "Тип элемента пока не поддержан для записи." };
     }
 
     const actual = readValue(handle);
-    const desired = handle.descriptor.type === "select" || handle.descriptor.type === "radio" ? actual : value;
-    const verified =
-      handle.descriptor.type === "combobox" ||
-      comparable(actual) === comparable(desired) ||
-      (handle.descriptor.type === "date" && Boolean(actual));
+    const verified = verificationOverride ?? comparable(actual) === comparable(expectedActual);
 
     return {
       id,
@@ -116,7 +127,9 @@ async function applyOne(state: ScanState, id: string, raw: PrimitiveFillValue | 
       status: verified ? "filled" : "review",
       requestedValue: value,
       actualValue: actual,
-      message: verified ? undefined : "Компонент не подтвердил запрошенное значение.",
+      message: verified
+        ? verificationMessage
+        : verificationMessage ?? "Компонент не подтвердил запрошенное значение.",
     };
   } catch (error) {
     return {
@@ -187,14 +200,19 @@ export async function undoLast(state: ScanState): Promise<UndoResult> {
     }
 
     try {
-      if (handle.descriptor.type === "checkbox" && element instanceof HTMLInputElement) {
+      if (handle.descriptor.type === "checkbox" && isInput(element)) {
         setChecked(element, booleanValue(snapshot.value));
       } else if (handle.descriptor.type === "radio") {
-        const match = matchRadioOption(handle.elements, snapshot.value);
-        if (match) setChecked(match.element, true);
-      } else if (element instanceof HTMLSelectElement) {
+        if (snapshot.value === null) {
+          for (const radio of handle.elements) if (isInput(radio)) setChecked(radio, false);
+        } else {
+          const match = matchRadioOption(handle.elements, snapshot.value);
+          if (!match) throw new Error("Не удалось восстановить radio-вариант.");
+          setChecked(match.element, true);
+        }
+      } else if (isSelect(element)) {
         setSelectValue(element, String(snapshot.value ?? ""));
-      } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      } else if (isInput(element) || isTextArea(element)) {
         setInputValue(element, String(snapshot.value ?? ""));
       } else if (element.isContentEditable) {
         setContentEditable(element, String(snapshot.value ?? ""));
