@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FormFill Assistant",
   "short_name": "FormFill",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Безопасно готовит screenshot + prompt для vision-ИИ, проверяет строгий Fxx JSON и заполняет веб-формы только после preview — без auto-submit.",
   "author": "f2re",
   "homepage_url": "https://github.com/f2re/firefox-formfill-assist",
