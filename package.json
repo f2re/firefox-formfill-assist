@@ -1,6 +1,6 @@
 {
   "name": "firefox-formfill-assist",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "Safety-first Firefox extension for screenshot-to-AI form filling with strict JSON, preview and no auto-submit.",
