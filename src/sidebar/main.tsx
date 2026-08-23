@@ -26,7 +26,7 @@ const PREVIEW_LIMIT = 40;
 
 type PreviewFilter = "all" | "attention";
 
-async function callTab<T>(action: "scan" | "toggleOverlay" | "preview" | "fill" | "undo", payload?: unknown): Promise<T> {
+async function callTab<T>(action: "scan" | "toggleOverlay" | "highlightProblems" | "preview" | "fill" | "undo", payload?: unknown): Promise<T> {
   const response = (await browser.runtime.sendMessage({
     scope: "tab",
     action,
@@ -208,6 +208,20 @@ function App() {
       setStatus("Отчёт о проблемных Fxx скопирован для ChatGPT. Защищённые поля исключены.");
     });
 
+  const highlightProblems = () =>
+    run(async () => {
+      if (!problemResults.length) throw new Error("Нет проблемных полей для подсветки.");
+      const count = await callTab<number>(
+        "highlightProblems",
+        problemResults.map((item) => ({
+          id: item.id,
+          status: item.status === "error" ? "error" as const : "review" as const,
+        })),
+      );
+      setOverlayVisible(true);
+      setStatus(`Подсвечено проблемных полей: ${count}. Красные — ошибки, жёлтые — требуют проверки.`);
+    });
+
   const clearHistory = () =>
     run(async () => {
       await browser.storage.local.remove("history");
@@ -347,14 +361,19 @@ function App() {
             <p class="status">После заполнения появилось новых полей: {result.newFieldCount}. Выполните анализ повторно.</p>
           )}
           {problemResults.length > 0 && (
-            <div class="problem-list">
-              {problemResults.map((item) => (
-                <div class="problem-item" key={item.id}>
-                  <strong>{item.id} — {item.label}</strong>
-                  <span>{item.message ?? (item.status === "review" ? "Требуется проверка." : "Не удалось заполнить поле.")}</span>
-                </div>
-              ))}
-            </div>
+            <>
+              <div class="problem-list">
+                {problemResults.map((item) => (
+                  <div class="problem-item" key={item.id}>
+                    <strong>{item.id} — {item.label}</strong>
+                    <span>{item.message ?? (item.status === "review" ? "Требуется проверка." : "Не удалось заполнить поле.")}</span>
+                  </div>
+                ))}
+              </div>
+              <div class="actions" style="margin-top:8px">
+                <button disabled={busy} onClick={highlightProblems}>Подсветить проблемные</button>
+              </div>
+            </>
           )}
           <div class="actions two" style="margin-top:8px">
             <button class="danger" disabled={busy} onClick={undo}>Отменить изменения</button>

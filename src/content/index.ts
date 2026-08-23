@@ -7,7 +7,13 @@ import {
 } from "./scanner";
 import { previewFill } from "./preview";
 import { fillRequest, undoLast } from "./filler";
-import { setOverlayHandles, setOverlayVisible, toggleOverlay } from "./overlay";
+import {
+  clearOverlayProblems,
+  setOverlayHandles,
+  setOverlayProblemStatuses,
+  setOverlayVisible,
+  toggleOverlay,
+} from "./overlay";
 
 declare global {
   interface Window {
@@ -102,6 +108,7 @@ if (!window.__FORMFILL_ASSIST_LOADED__) {
   };
 
   const scan = (showOverlay = true, acceptRoute = false): ScanState => {
+    clearOverlayProblems();
     state = scanDocument(mutationRevision);
     setOverlayHandles(state.handles);
     rebindObservers();
@@ -122,6 +129,7 @@ if (!window.__FORMFILL_ASSIST_LOADED__) {
     mutationRevision += 1;
     routeInvalidated = true;
     state = null;
+    clearOverlayProblems();
     setOverlayHandles(new Map());
     rebindObservers();
   };
@@ -175,10 +183,30 @@ if (!window.__FORMFILL_ASSIST_LOADED__) {
 
       const freshState = ensureFreshState();
 
+      if (action === "highlightProblems") {
+        const problems = Array.isArray(payload)
+          ? payload.filter(
+              (item): item is { id: string; status: "review" | "error" } =>
+                Boolean(
+                  item &&
+                    typeof item === "object" &&
+                    "id" in item &&
+                    typeof item.id === "string" &&
+                    "status" in item &&
+                    (item.status === "review" || item.status === "error") &&
+                    freshState.handles.has(item.id),
+                ),
+            )
+          : [];
+        const count = setOverlayProblemStatuses(problems);
+        setOverlayVisible(true);
+        return { ok: true, data: count };
+      }
       if (action === "preview") {
         return { ok: true, data: previewFill(freshState, payload as FillRequest) };
       }
       if (action === "fill") {
+        clearOverlayProblems();
         const result = await fillRequest(freshState, payload as FillRequest, mutationRevision);
         state = scanDocument(mutationRevision);
         setOverlayHandles(state.handles);
@@ -186,6 +214,7 @@ if (!window.__FORMFILL_ASSIST_LOADED__) {
         return { ok: true, data: result };
       }
       if (action === "undo") {
+        clearOverlayProblems();
         const result = await undoLast(freshState);
         state = scanDocument(mutationRevision);
         setOverlayHandles(state.handles);
