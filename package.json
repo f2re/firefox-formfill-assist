@@ -1,9 +1,9 @@
 {
   "name": "firefox-formfill-assist",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Firefox extension that safely fills forms from schema-strict JSON prepared by vision AI.",
+  "description": "Safety-first Firefox extension for screenshot-to-AI form filling with strict JSON, preview and no auto-submit.",
   "scripts": {
     "build": "node scripts/build.mjs",
     "package": "node scripts/package.mjs",
