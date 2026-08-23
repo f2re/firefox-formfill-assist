@@ -11,7 +11,7 @@
     "32": "icons/formfill.svg",
     "48": "icons/formfill.svg",
     "96": "icons/formfill.svg",
-    "128": "icons/formfill.svg"
+    "128": "icons/formfill-128.png"
   },
   "browser_specific_settings": {
     "gecko": {
