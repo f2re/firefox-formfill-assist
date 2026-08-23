@@ -26,14 +26,10 @@ export function makeGptPacket(manifest: FormManifest): string {
     fields: manifest.fields.map(publicField),
   };
 
-  const example = {
+  const emptyResponse = {
     version: 1,
     pageFingerprint: manifest.pageFingerprint,
-    fields: {
-      F01: "пример текстового значения",
-      F02: { action: "select", value: "точный текст варианта" },
-      F03: { action: "check" },
-    },
+    fields: {},
   };
 
   return [
@@ -58,15 +54,16 @@ export function makeGptPacket(manifest: FormManifest): string {
     "- text / textarea / email / tel / contenteditable: строка с фактическим значением без комментариев.",
     "- number: JSON-число, если число однозначно. Если в manifest указан unit, единицу измерения в value не добавляй.",
     "- date: строка YYYY-MM-DD. Преобразуй локальную дату только если день, месяц и год однозначны.",
-    "- select / radio / combobox: предпочитай operation {\"action\":\"select\",\"value\":\"...\"}. Если options перечислены, используй точный текст одного из них. Для optionsDynamic или optionsTruncated можно использовать точный видимый вариант со скриншота; при сомнении поле пропусти.",
+    "- select / radio / combobox: используй {\"action\":\"select\",\"value\":\"точный вариант\"}. Если options перечислены, value должен точно совпадать с одним из них. Для optionsDynamic или optionsTruncated можно использовать точный видимый вариант со скриншота; при сомнении поле пропусти.",
     "- checkbox: {\"action\":\"check\"} только когда нужно явно включить; {\"action\":\"uncheck\"} только когда нужно явно выключить. Не делай вывод по умолчанию.",
-    "- clear используй только если пользователь явно требует очистить поле.",
+    "- clear используй только если пользователь явно требует очистить поле: {\"action\":\"clear\"}.",
     "",
     "ФОРМАТ ОТВЕТА:",
     "Верни только один JSON object. Без Markdown fences, без текста до или после JSON.",
-    "Допустимая структура:",
-    JSON.stringify(example, null, 2),
-    "Это только пример структуры: включай лишь реальные id из manifest и лишь значения, подтверждённые данными пользователя/вложениями.",
+    "В fields каждый ключ — реальный id из manifest, а значение — строка/число/boolean/null либо описанная выше operation.",
+    "Минимально допустимый ответ, если подтверждённых данных нет:",
+    JSON.stringify(emptyResponse, null, 2),
+    "Не копируй вымышленные примеры значений: в итоговом fields должны быть только подтверждённые данные.",
     "",
     "Перед ответом внутренне проверь:",
     "- каждый ключ fields существует в manifest;",
