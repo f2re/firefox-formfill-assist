@@ -40,9 +40,11 @@ describe("scanner runtime roots", () => {
 
     const discovery = discoverObservationRoots();
     expect(discovery.roots).toContain(shadow);
+    expect(discovery.unsupportedCrossOriginFrames).toBe(0);
 
     const state = scanDocument(0);
     expect(state.manifest.fields.some((field) => field.label.includes("Поле Shadow"))).toBe(true);
+    expect(state.manifest.unsupportedCrossOriginFrames).toBe(0);
   });
 
   it("discovers same-origin iframe documents", () => {
@@ -56,9 +58,11 @@ describe("scanner runtime roots", () => {
 
     const discovery = discoverObservationRoots();
     expect(discovery.roots).toContain(child);
+    expect(discovery.unsupportedCrossOriginFrames).toBe(0);
 
     const state = scanDocument(0);
     expect(state.manifest.fields.some((field) => field.label.includes("Поле iframe"))).toBe(true);
+    expect(state.manifest.unsupportedCrossOriginFrames).toBe(0);
   });
 
   it("keeps Fxx stable after a framework-style rerender", () => {
@@ -86,9 +90,11 @@ describe("scanner runtime roots", () => {
       visible(child.querySelector("input") as HTMLInputElement);
     }
 
-    const fields = scanDocument(0).manifest.fields.filter((field) => field.label.includes("Одинаковое поле"));
+    const state = scanDocument(0);
+    const fields = state.manifest.fields.filter((field) => field.label.includes("Одинаковое поле"));
     expect(fields).toHaveLength(2);
     expect(fields[0]!.id).not.toBe(fields[1]!.id);
     expect(fields[0]!.fingerprint.domPath).not.toBe(fields[1]!.fingerprint.domPath);
+    expect(state.manifest.unsupportedCrossOriginFrames).toBe(0);
   });
 });
