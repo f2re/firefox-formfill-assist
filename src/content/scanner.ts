@@ -14,6 +14,13 @@ export interface ScanState {
   handles: Map<string, FieldHandle>;
 }
 
+export type ObservationRoot = Document | ShadowRoot;
+
+export interface ObservationDiscovery {
+  roots: ObservationRoot[];
+  unsupportedCrossOriginFrames: number;
+}
+
 const selector = [
   "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image])",
   "textarea",
@@ -166,22 +173,37 @@ function idFor(element: HTMLElement, fingerprint: FieldFingerprint): string {
   return id;
 }
 
-function collectCandidates(root: Document | ShadowRoot, output: HTMLElement[], frameCounter: { unsupported: number }): void {
-  output.push(...Array.from(root.querySelectorAll<HTMLElement>(selector)));
+function discoverRoots(
+  root: ObservationRoot,
+  roots: ObservationRoot[],
+  seen: Set<ObservationRoot>,
+  frameCounter: { unsupported: number },
+): void {
+  if (seen.has(root)) return;
+  seen.add(root);
+  roots.push(root);
 
   for (const host of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
-    if (host.shadowRoot) collectCandidates(host.shadowRoot, output, frameCounter);
+    if (host.shadowRoot) discoverRoots(host.shadowRoot, roots, seen, frameCounter);
   }
 
   for (const frame of Array.from(root.querySelectorAll<HTMLIFrameElement>("iframe"))) {
     try {
       const childDocument = frame.contentDocument;
-      if (childDocument) collectCandidates(childDocument, output, frameCounter);
+      if (childDocument) discoverRoots(childDocument, roots, seen, frameCounter);
       else frameCounter.unsupported += 1;
     } catch {
       frameCounter.unsupported += 1;
     }
   }
+}
+
+export function discoverObservationRoots(): ObservationDiscovery {
+  const roots: ObservationRoot[] = [];
+  const seen = new Set<ObservationRoot>();
+  const frameCounter = { unsupported: 0 };
+  discoverRoots(document, roots, seen, frameCounter);
+  return { roots, unsupportedCrossOriginFrames: frameCounter.unsupported };
 }
 
 function radioGroup(candidates: HTMLElement[], element: HTMLInputElement): HTMLInputElement[] {
@@ -197,9 +219,8 @@ function radioGroup(candidates: HTMLElement[], element: HTMLInputElement): HTMLI
 }
 
 export function scanDocument(mutationRevision: number): ScanState {
-  const candidates: HTMLElement[] = [];
-  const frameCounter = { unsupported: 0 };
-  collectCandidates(document, candidates, frameCounter);
+  const discovery = discoverObservationRoots();
+  const candidates = discovery.roots.flatMap((root) => Array.from(root.querySelectorAll<HTMLElement>(selector)));
 
   const handles = new Map<string, FieldHandle>();
   const handled = new Set<HTMLElement>();
@@ -257,7 +278,7 @@ export function scanDocument(mutationRevision: number): ScanState {
     pageFingerprint: pageFingerprint(page, fields),
     createdAt: new Date().toISOString(),
     fields,
-    unsupportedCrossOriginFrames: frameCounter.unsupported,
+    unsupportedCrossOriginFrames: discovery.unsupportedCrossOriginFrames,
     mutationRevision,
   };
 
