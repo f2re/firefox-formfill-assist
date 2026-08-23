@@ -185,7 +185,6 @@ function App() {
       if (!manifest || !request || !preview) throw new Error("Сначала загрузите JSON и проверьте preview.");
       if (preview.pageMismatch) throw new Error("Fingerprint страницы отличается. Выполните анализ заново и получите новый JSON.");
       if (preview.counts.error > 0) throw new Error("В preview есть ошибки. Исправьте JSON перед заполнением.");
-      if (preview.counts.review > 0) throw new Error("В preview остались неоднозначные значения. Уточните JSON перед заполнением.");
 
       const next = await callTab<FillResult>("fill", request);
       setResult(next);
@@ -323,7 +322,7 @@ function App() {
           <div class="actions" style="margin-top:8px">
             <button
               class="primary"
-              disabled={busy || preview.pageMismatch || preview.counts.error > 0 || preview.counts.review > 0}
+              disabled={busy || preview.pageMismatch || preview.counts.error > 0}
               onClick={fill}
             >
               5. Заполнить {preview.counts.ok} полей
