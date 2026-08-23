@@ -90,13 +90,20 @@ function addMasks(doc: Document, createdRoots: HTMLElement[]): void {
   }
 }
 
-const alreadyMasked = Boolean(document.getElementById(ROOT_ID));
-if (alreadyMasked) {
-  removeMasks(document);
-} else {
+export function toggleCaptureMasks(doc: Document, autoCleanup = true): boolean {
+  if (doc.getElementById(ROOT_ID)) {
+    removeMasks(doc);
+    return false;
+  }
+
   const createdRoots: HTMLElement[] = [];
-  addMasks(document, createdRoots);
-  window.setTimeout(() => {
-    for (const root of createdRoots) root.remove();
-  }, AUTO_CLEANUP_MS);
+  addMasks(doc, createdRoots);
+  if (autoCleanup) {
+    doc.defaultView?.setTimeout(() => {
+      for (const root of createdRoots) root.remove();
+    }, AUTO_CLEANUP_MS);
+  }
+  return true;
 }
+
+if (typeof document !== "undefined") toggleCaptureMasks(document);
