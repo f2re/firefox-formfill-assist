@@ -272,12 +272,12 @@ function App() {
         await navigator.clipboard.writeText(
           makeGptPacket(manifest, { sessionId: session.id, pageNumber: page.pageNumber }),
         );
-        setStatus(`Описание страницы ${page.pageNumber} с идентификаторами P${page.pageNumber}-Fxx скопировано для GPT.`);
+        setStatus(`Промпт страницы ${page.pageNumber} с идентификаторами P${page.pageNumber}-Fxx скопирован для ИИ.`);
         return;
       }
 
       await navigator.clipboard.writeText(makeGptPacket(manifest));
-      setStatus("Описание формы и инструкция для GPT скопированы в буфер.");
+      setStatus("Динамический промпт и manifest текущей формы скопированы для ИИ.");
     });
 
   const applyParsedPreview = async (text: string): Promise<void> => {
@@ -350,7 +350,7 @@ function App() {
           }
         : undefined;
       await navigator.clipboard.writeText(stringifyGptFeedbackReport(manifest, result, options));
-      setStatus("Отчёт о проблемных полях скопирован для ChatGPT. Защищённые поля исключены.");
+      setStatus("Privacy-safe отчёт о проблемных полях скопирован для ИИ. Защищённые поля исключены.");
     });
 
   const highlightProblems = () =>
@@ -409,7 +409,7 @@ function App() {
       <header class="header">
         <div>
           <div class="title">FormFill Assistant</div>
-          <div class="small">JSON → preview → DOM, без submit</div>
+          <div class="small">ИИ → JSON → preview → безопасное заполнение</div>
         </div>
         <div class="version">v{browser.runtime.getManifest().version}</div>
       </header>
@@ -473,18 +473,18 @@ function App() {
       </section>
 
       <section class="actions main">
-        <button class="primary" disabled={busy} onClick={analyze}>1. Анализировать</button>
+        <button class="primary" disabled={busy} onClick={analyze}>1. Анализировать форму</button>
         <button disabled={busy || !manifest} onClick={toggleNumbers}>
-          2. {overlayVisible ? "Скрыть номера" : "Показать номера"}
+          2. {overlayVisible ? "Скрыть Fxx" : "Показать Fxx"}
         </button>
-        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={copyForGpt}>3. Скопировать для GPT</button>
-        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={pasteClipboard}>4. Вставить ответ</button>
+        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={copyForGpt}>3. Скопировать промпт для ИИ</button>
+        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={pasteClipboard}>4. Вставить ответ ИИ</button>
       </section>
 
       {preview && (
         <section class={`card ${preview.pageMismatch ? "warning" : ""}`}>
           <div class="section-head">
-            <strong>Предварительный просмотр</strong>
+            <strong>Предварительная проверка</strong>
             <div class="segmented" aria-label="Фильтр preview">
               <button
                 class={previewFilter === "all" ? "selected" : ""}
@@ -534,7 +534,7 @@ function App() {
               disabled={busy || preview.pageMismatch || preview.counts.error > 0 || Boolean(sessionCandidate)}
               onClick={fill}
             >
-              5. Заполнить {preview.counts.ok} полей
+              5. Заполнить {preview.counts.ok} безопасных полей
             </button>
           </div>
         </section>
@@ -572,7 +572,7 @@ function App() {
           )}
           <div class="actions two" style="margin-top:8px">
             <button class="danger" disabled={busy} onClick={undo}>Отменить изменения</button>
-            <button disabled={busy} onClick={copyResultForGpt}>Скопировать отчёт для GPT</button>
+            <button disabled={busy} onClick={copyResultForGpt}>Скопировать отчёт для ИИ</button>
           </div>
         </section>
       )}
