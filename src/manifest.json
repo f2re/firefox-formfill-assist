@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FormFill Assistant",
   "short_name": "FormFill",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Заполняет веб-формы по проверенному Fxx JSON и готовит снимок с промптом для vision-ИИ без автоматической отправки формы.",
   "browser_specific_settings": {
     "gecko": {
