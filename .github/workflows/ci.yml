@@ -10,6 +10,31 @@ permissions:
   contents: read
 
 jobs:
+  lockfile-export:
+    if: github.ref == 'refs/heads/agent/release-engineering'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Generate lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Upload generated lockfile
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-package-lock-${{ github.sha }}
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 1
+
   firefox-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
