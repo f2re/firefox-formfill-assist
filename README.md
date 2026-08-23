@@ -19,6 +19,7 @@ Firefox WebExtension для безопасного заполнения прои
 - временные privacy-маски поверх видимых редактируемых значений на время снимка;
 - копирование PNG в системный clipboard и fallback `Скачать PNG`;
 - многостраничные локальные сессии с `P1-Fxx`, `P2-Fxx` без автоматической навигации;
+- сохранение iframe identity внутри сессии: `I1-F02` → `P1-I1-F02`;
 - распознавание JSON даже внутри Markdown fences/окружающего текста;
 - строгая схема допустимых идентификаторов, selectors отклоняются;
 - обязательный preview с `ok / review / error / same / skip`;
@@ -54,6 +55,8 @@ Firefox WebExtension для безопасного заполнения прои
 ### Многостраничные анкеты
 
 После анализа первой страницы можно нажать `Начать сессию`. Текущие поля экспортируются как `P1-Fxx`. После ручного перехода на следующую страницу расширение обнаруживает смену формы и предлагает явно подтвердить `Продолжить текущую сессию`; только после подтверждения новая страница получает namespace `P2-Fxx`.
+
+Поля внутри same-origin iframe сохраняют полный namespace: например `I1-F02` на первой странице экспортируется как `P1-I1-F02` и безопасно нормализуется обратно перед заполнением.
 
 Автоматический переход между страницами намеренно запрещён.
 
@@ -101,7 +104,7 @@ firefox-formfill-assist-X.Y.Z-unsigned.xpi
 SHA256SUMS
 ```
 
-`.github/workflows/release.yml` запускается по тегу `v*` или вручную. Tag release проходит тот же Firefox E2E, проверяет, что тег точно соответствует версии `vX.Y.Z`, затем создаёт GitHub Release.
+`.github/workflows/release.yml` выпускает новую версию при изменении `package.json` в `main`. Workflow вычисляет `vX.Y.Z`, прогоняет Firefox E2E, typecheck/unit tests, сборку, Mozilla lint и reproducibility check, после чего создаёт неизменяемый Git tag и GitHub Release с ZIP/XPI/checksums. Повторный запуск для существующего тега допускается только если тег указывает на тот же commit; перенос существующего релизного тега запрещён.
 
 ### Постоянно устанавливаемый XPI для обычного Firefox
 
@@ -152,7 +155,7 @@ web-ext sign --channel unlisted
 - open Shadow DOM;
 - явный переход P1 → P2 в многостраничной сессии.
 
-Unit tests дополнительно проверяют AI prompt binding и privacy-mask слой screenshot workflow.
+Unit tests дополнительно проверяют AI prompt binding, page-qualified iframe IDs и privacy-mask слой screenshot workflow.
 
 ## Архитектура
 
@@ -183,4 +186,4 @@ DOM
 
 ## Статус
 
-`main` содержит hardened MVP v0.2.0 плюс многостраничные сессии и встроенный screenshot → vision-AI handoff. Следующий релизный тег создаётся отдельно после зелёного CI и финального Firefox smoke-test.
+`v0.3.0` — screenshot/vision-AI handoff, многостраничные `Pn-Fxx` сессии, сохранение iframe identity, hardened prompt contract и воспроизводимый gated release pipeline.
