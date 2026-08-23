@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "FormFill Assistant",
+  "short_name": "FormFill",
+  "version": "0.1.0",
+  "description": "Заполняет веб-формы по проверенному Fxx JSON без автоматической отправки формы.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "firefox-formfill-assist@f2re.github",
+      "strict_min_version": "121.0"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "clipboardRead",
+    "clipboardWrite",
+    "scripting"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "FormFill Assistant",
+    "default_icon": "icons/formfill.svg"
+  },
+  "sidebar_action": {
+    "default_title": "FormFill Assistant",
+    "default_panel": "sidebar/index.html",
+    "default_icon": "icons/formfill.svg",
+    "open_at_install": false
+  },
+  "commands": {
+    "_execute_sidebar_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "Открыть FormFill Assistant"
+    },
+    "analyze-form": {
+      "suggested_key": {
+        "default": "Alt+Shift+A"
+      },
+      "description": "Проанализировать текущую форму"
+    },
+    "paste-json": {
+      "suggested_key": {
+        "default": "Alt+Shift+V"
+      },
+      "description": "Вставить JSON из буфера"
+    },
+    "fill-preview": {
+      "suggested_key": {
+        "default": "Alt+Shift+E"
+      },
+      "description": "Заполнить поля после preview"
+    }
+  }
+}
