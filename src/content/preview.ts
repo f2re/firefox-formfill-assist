@@ -9,6 +9,7 @@ import { normalizeText } from "../shared/normalize";
 import type { ScanState } from "./scanner";
 import { readValue } from "./values";
 import { matchRadioOption, matchSelectOption } from "./match";
+import { isSelect } from "./dom";
 
 function operationValue(raw: PrimitiveFillValue | FillOperation): PrimitiveFillValue {
   if (typeof raw === "object" && raw !== null && "action" in raw) {
@@ -88,7 +89,7 @@ export function previewFill(state: ScanState, request: FillRequest): PreviewResu
     }
 
     const element = handle.elements[0];
-    if (element instanceof HTMLSelectElement) {
+    if (element && isSelect(element)) {
       const match = matchSelectOption(element, requestedValue);
       if (!match) {
         items.push({
