@@ -3,6 +3,9 @@ import type { FillRequest, FillResult, FormManifest } from "./types";
 export const FORM_SESSION_STORAGE_KEY = "activeFormSession";
 export const FORM_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
+const LOCAL_FIELD_ID_PATTERN = /^(?:F\d{2,}|I\d+-F\d{2,})$/;
+const SESSION_FIELD_ID_PATTERN = /^P(\d+)-((?:F\d{2,}|I\d+-F\d{2,}))$/;
+
 export interface SessionPageSummary {
   pageNumber: number;
   page: string;
@@ -133,7 +136,7 @@ export function sessionMatchesManifest(session: FormSession, manifest: FormManif
 }
 
 export function qualifySessionFieldId(pageNumber: number, fieldId: string): string {
-  if (!/^F\d{2,}$/.test(fieldId)) throw new Error(`Нельзя создать session ID из ${fieldId}.`);
+  if (!LOCAL_FIELD_ID_PATTERN.test(fieldId)) throw new Error(`Нельзя создать session ID из ${fieldId}.`);
   return `P${pageNumber}-${fieldId}`;
 }
 
@@ -151,21 +154,24 @@ export function normalizeSessionFillRequest(
     throw new Error("SESSION_PAGE_MISMATCH: JSON создан для другой страницы сессии.");
   }
 
-  const prefix = `P${page.pageNumber}-`;
   const fields: FillRequest["fields"] = {};
   for (const [qualifiedId, value] of Object.entries(request.fields)) {
-    if (!qualifiedId.startsWith(prefix)) {
-      const pageMatch = /^P(\d+)-F\d{2,}$/.exec(qualifiedId);
-      if (pageMatch) {
-        throw new Error(
-          `SESSION_PAGE_MISMATCH: ${qualifiedId} относится к странице ${pageMatch[1]}, активна страница ${page.pageNumber}.`,
-        );
-      }
-      throw new Error(`В активной сессии ожидаются идентификаторы вида ${prefix}F01.`);
+    const match = SESSION_FIELD_ID_PATTERN.exec(qualifiedId);
+    if (!match) {
+      throw new Error(
+        `В активной сессии ожидаются идентификаторы вида P${page.pageNumber}-F01 или P${page.pageNumber}-I1-F01.`,
+      );
     }
 
-    const localId = qualifiedId.slice(prefix.length);
-    if (!/^F\d{2,}$/.test(localId)) throw new Error(`Некорректный идентификатор сессии: ${qualifiedId}.`);
+    const requestedPage = Number(match[1]);
+    if (requestedPage !== page.pageNumber) {
+      throw new Error(
+        `SESSION_PAGE_MISMATCH: ${qualifiedId} относится к странице ${requestedPage}, активна страница ${page.pageNumber}.`,
+      );
+    }
+
+    const localId = match[2]!;
+    if (!LOCAL_FIELD_ID_PATTERN.test(localId)) throw new Error(`Некорректный идентификатор сессии: ${qualifiedId}.`);
     fields[localId] = value;
   }
 
