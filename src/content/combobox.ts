@@ -40,12 +40,12 @@ function isUnsafeOption(element: HTMLElement): boolean {
   return false;
 }
 
-function controlledRoots(element: HTMLElement): Element[] {
+function controlledRoots(element: HTMLElement): HTMLElement[] {
   const owner = element.ownerDocument;
   const ids = `${element.getAttribute("aria-controls") ?? ""} ${element.getAttribute("aria-owns") ?? ""}`
     .split(/\s+/)
     .filter(Boolean);
-  return ids.map((id) => owner.getElementById(id)).filter((root): root is Element => Boolean(root));
+  return ids.map((id) => owner.getElementById(id)).filter((root): root is HTMLElement => Boolean(root));
 }
 
 function optionElements(element: HTMLElement): HTMLElement[] {
