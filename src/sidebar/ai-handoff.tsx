@@ -20,6 +20,11 @@ interface CapturedHandoff {
   screenshotCopied: boolean;
 }
 
+interface ActiveTab extends browser.tabs.Tab {
+  id: number;
+  windowId: number;
+}
+
 const PANEL_CSS = `
 #ai-handoff-root { position: relative; z-index: 50; }
 .ai-handoff-fab {
@@ -71,10 +76,12 @@ async function loadSession(): Promise<FormSession | null> {
   return candidate;
 }
 
-async function activeTab(): Promise<browser.tabs.Tab> {
+async function activeTab(): Promise<ActiveTab> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || tab.windowId === undefined) throw new Error("Не удалось определить активную вкладку.");
-  return tab;
+  if (!tab || typeof tab.id !== "number" || typeof tab.windowId !== "number") {
+    throw new Error("Не удалось определить активную вкладку.");
+  }
+  return tab as ActiveTab;
 }
 
 async function togglePrivacyMasks(tabId: number): Promise<void> {
@@ -133,14 +140,14 @@ function AiHandoff() {
       let masksEnabled = false;
       let dataUrl = "";
       try {
-        await togglePrivacyMasks(tab.id!);
+        await togglePrivacyMasks(tab.id);
         masksEnabled = true;
         await delay(110);
         dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
       } finally {
         if (masksEnabled) {
           try {
-            await togglePrivacyMasks(tab.id!);
+            await togglePrivacyMasks(tab.id);
           } catch {
             // The injected mask script also removes itself automatically after 15 seconds.
           }
