@@ -11,11 +11,19 @@ function topViewportRect(element: HTMLElement): DOMRect {
   let top = rect.top;
   let currentWindow = element.ownerDocument.defaultView;
 
-  while (currentWindow?.frameElement instanceof HTMLElement) {
-    const frameRect = currentWindow.frameElement.getBoundingClientRect();
+  while (currentWindow && currentWindow !== currentWindow.parent) {
+    let frame: Element | null = null;
+    try {
+      frame = currentWindow.frameElement;
+    } catch {
+      break;
+    }
+    if (!frame) break;
+
+    const frameRect = frame.getBoundingClientRect();
     left += frameRect.left;
     top += frameRect.top;
-    currentWindow = currentWindow.parent;
+    currentWindow = frame.ownerDocument.defaultView;
   }
 
   return new DOMRect(left, top, rect.width, rect.height);
