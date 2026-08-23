@@ -51,7 +51,7 @@
     },
     "fill-preview": {
       "suggested_key": {
-        "default": "Alt+Shift+Enter"
+        "default": "Alt+Shift+E"
       },
       "description": "Заполнить поля после preview"
     }
