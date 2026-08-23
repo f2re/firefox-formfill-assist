@@ -2,15 +2,60 @@ name: Release / Firefox
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: ["main"]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src/manifest.json"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: firefox-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      release_needed: ${{ steps.meta.outputs.release_needed }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Resolve release version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          RELEASE_NEEDED=false
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            RELEASE_NEEDED=true
+          else
+            PREVIOUS_VERSION=$(git show "${GITHUB_SHA}^:package.json" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>console.log(JSON.parse(s).version));")
+            if [[ "${PREVIOUS_VERSION}" != "${VERSION}" ]]; then
+              RELEASE_NEEDED=true
+            fi
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "release_needed=${RELEASE_NEEDED}" >> "$GITHUB_OUTPUT"
+          echo "Release candidate: ${TAG}; needed=${RELEASE_NEEDED}"
+
   firefox-e2e:
+    needs: prepare
+    if: needs.prepare.outputs.release_needed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -45,15 +90,20 @@ jobs:
           retention-days: 14
 
   release:
-    needs: firefox-e2e
+    needs: [prepare, firefox-e2e]
+    if: needs.prepare.outputs.release_needed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
       WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Node.js
         uses: actions/setup-node@v7
@@ -74,6 +124,12 @@ jobs:
           npm run lint:extension
           npm run package
 
+      - name: Verify reproducible package bytes
+        run: |
+          cp artifacts/SHA256SUMS /tmp/formfill-release-SHA256SUMS
+          npm run package
+          diff -u /tmp/formfill-release-SHA256SUMS artifacts/SHA256SUMS
+
       - name: Sign unlisted XPI at AMO
         if: ${{ env.WEB_EXT_API_KEY != '' && env.WEB_EXT_API_SECRET != '' }}
         run: |
@@ -87,10 +143,26 @@ jobs:
             sha256sum ./* > SHA256SUMS
           )
 
+      - name: Create immutable release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_SHA=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')
+          if [[ -n "${REMOTE_SHA}" && "${REMOTE_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "Tag ${RELEASE_TAG} already exists on ${REMOTE_SHA}, refusing to retag ${GITHUB_SHA}." >&2
+            exit 1
+          fi
+          if [[ -z "${REMOTE_SHA}" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "${RELEASE_TAG}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${RELEASE_TAG}"
+          fi
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: firefox-formfill-assist-release-${{ github.ref_name }}
+          name: firefox-formfill-assist-release-${{ env.RELEASE_TAG }}
           path: |
             artifacts/*
             signed/*
@@ -98,9 +170,11 @@ jobs:
           retention-days: 90
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: FormFill Assistant ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |
