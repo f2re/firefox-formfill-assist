@@ -68,7 +68,7 @@ jobs:
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E and gated build. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E, AMO signing and gated build. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
   firefox-e2e:
     needs: prepare
@@ -110,7 +110,7 @@ jobs:
     needs: [prepare, firefox-e2e]
     if: needs.prepare.outputs.release_needed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
       WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
@@ -121,6 +121,16 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Require AMO signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${WEB_EXT_API_KEY:-}" || -z "${WEB_EXT_API_SECRET:-}" ]]; then
+            echo "::error title=AMO signing credentials missing::Set repository secrets WEB_EXT_API_KEY (AMO JWT issuer) and WEB_EXT_API_SECRET (AMO JWT secret). Unsigned Firefox releases are forbidden."
+            exit 1
+          fi
+          echo "AMO signing credentials are configured."
 
       - name: Node.js
         uses: actions/setup-node@v7
@@ -141,24 +151,36 @@ jobs:
           npm run lint:extension
           npm run package
 
-      - name: Verify reproducible package bytes
+      - name: Verify reproducible unsigned package bytes
         run: |
           cp artifacts/SHA256SUMS /tmp/formfill-release-SHA256SUMS
           npm run package
           diff -u /tmp/formfill-release-SHA256SUMS artifacts/SHA256SUMS
 
       - name: Sign unlisted XPI at AMO
-        if: ${{ env.WEB_EXT_API_KEY != '' && env.WEB_EXT_API_SECRET != '' }}
+        shell: bash
         run: |
+          set -euo pipefail
+          rm -rf signed
           mkdir -p signed
           npx web-ext sign \
             --source-dir dist \
             --artifacts-dir signed \
-            --channel unlisted
+            --channel unlisted \
+            --approval-timeout 900000
+
+          mapfile -t SIGNED_XPI < <(find signed -maxdepth 1 -type f -name '*.xpi' -print)
+          if [[ "${#SIGNED_XPI[@]}" -ne 1 ]]; then
+            echo "::error title=Signed XPI missing::AMO signing must produce exactly one signed XPI, found ${#SIGNED_XPI[@]}."
+            find signed -maxdepth 1 -type f -print || true
+            exit 1
+          fi
+          test -s "${SIGNED_XPI[0]}"
           (
             cd signed
-            sha256sum ./* > SHA256SUMS
+            sha256sum ./*.xpi > SHA256SUMS
           )
+          echo "AMO signed XPI: ${SIGNED_XPI[0]}"
 
       - name: Create or verify immutable release tag
         shell: bash
@@ -167,14 +189,16 @@ jobs:
           REMOTE_SHA=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')
 
           if [[ -n "${REMOTE_SHA}" && "${REMOTE_SHA}" != "${GITHUB_SHA}" ]]; then
-            NON_WORKFLOW_DIFF=$(git diff --name-only "${REMOTE_SHA}" "${GITHUB_SHA}" -- . ':(exclude).github/workflows/release.yml')
-            if [[ -n "${NON_WORKFLOW_DIFF}" ]]; then
+            NON_RELEASE_DIFF=$(git diff --name-only "${REMOTE_SHA}" "${GITHUB_SHA}" -- . \
+              ':(exclude).github/workflows/release.yml' \
+              ':(exclude)docs/**')
+            if [[ -n "${NON_RELEASE_DIFF}" ]]; then
               echo "Tag ${RELEASE_TAG} already exists on ${REMOTE_SHA}; current ${GITHUB_SHA} also changes release payload files:" >&2
-              echo "${NON_WORKFLOW_DIFF}" >&2
+              echo "${NON_RELEASE_DIFF}" >&2
               echo "Refusing to retag or publish mismatched artifacts." >&2
               exit 1
             fi
-            echo "Tag ${RELEASE_TAG} already points to ${REMOTE_SHA}; current commit differs only in release workflow. Reusing immutable tag."
+            echo "Tag ${RELEASE_TAG} already points to ${REMOTE_SHA}; current commit changes only release automation/docs. Reusing immutable tag."
           fi
 
           if [[ -z "${REMOTE_SHA}" ]]; then
@@ -212,7 +236,7 @@ jobs:
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "Published ${RELEASE_TAG}: Firefox E2E, checks, lint, deterministic packaging and GitHub Release completed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --body "Published signed ${RELEASE_TAG}: Firefox E2E, checks, Mozilla lint, deterministic packaging and AMO signing completed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
   notify-failure:
     needs: [prepare, firefox-e2e, release]
@@ -225,4 +249,4 @@ jobs:
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "Release ${{ needs.prepare.outputs.tag }} failed a gate. Firefox E2E=${{ needs.firefox-e2e.result }}, release=${{ needs.release.result }}. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --body "Release ${{ needs.prepare.outputs.tag }} failed a gate. Firefox E2E=${{ needs.firefox-e2e.result }}, release=${{ needs.release.result }}. Check AMO signing credentials and run logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
