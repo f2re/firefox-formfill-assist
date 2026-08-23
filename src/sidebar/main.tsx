@@ -13,6 +13,19 @@ import type {
 import { parseFillRequest } from "../shared/schema";
 import { makeGptPacket } from "../shared/gpt";
 import { stringifyGptFeedbackReport } from "../shared/report";
+import {
+  FORM_SESSION_STORAGE_KEY,
+  acceptManifestInSession,
+  createFormSession,
+  currentSessionPage,
+  isFormSessionExpired,
+  normalizeSessionFillRequest,
+  qualifySessionFieldId,
+  recordSessionFillResult,
+  relationToSession,
+  sessionMatchesManifest,
+  type FormSession,
+} from "../shared/session";
 
 const STATUS_LABEL: Record<PreviewItem["status"], string> = {
   ok: "✓ готово",
@@ -25,8 +38,9 @@ const STATUS_LABEL: Record<PreviewItem["status"], string> = {
 const PREVIEW_LIMIT = 40;
 
 type PreviewFilter = "all" | "attention";
+type TabAction = "ping" | "scan" | "toggleOverlay" | "highlightProblems" | "preview" | "fill" | "undo";
 
-async function callTab<T>(action: "scan" | "toggleOverlay" | "highlightProblems" | "preview" | "fill" | "undo", payload?: unknown): Promise<T> {
+async function callTab<T>(action: TabAction, payload?: unknown): Promise<T> {
   const response = (await browser.runtime.sendMessage({
     scope: "tab",
     action,
@@ -63,6 +77,27 @@ async function saveHistory(manifest: FormManifest, result: FillResult): Promise<
   return next;
 }
 
+async function loadActiveSession(): Promise<FormSession | null> {
+  const stored = await browser.storage.local.get(FORM_SESSION_STORAGE_KEY);
+  const candidate = stored[FORM_SESSION_STORAGE_KEY] as FormSession | undefined;
+  if (!candidate || candidate.version !== 1 || typeof candidate.id !== "string" || !Array.isArray(candidate.pages)) {
+    return null;
+  }
+  if (isFormSessionExpired(candidate)) {
+    await browser.storage.local.remove(FORM_SESSION_STORAGE_KEY);
+    return null;
+  }
+  return candidate;
+}
+
+async function persistActiveSession(session: FormSession | null): Promise<void> {
+  if (session) {
+    await browser.storage.local.set({ [FORM_SESSION_STORAGE_KEY]: session });
+  } else {
+    await browser.storage.local.remove(FORM_SESSION_STORAGE_KEY);
+  }
+}
+
 function historyTime(timestamp: string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return timestamp;
@@ -82,6 +117,8 @@ function App() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [result, setResult] = useState<FillResult | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [session, setSession] = useState<FormSession | null>(null);
+  const [sessionCandidate, setSessionCandidate] = useState<FormManifest | null>(null);
   const [previewFilter, setPreviewFilter] = useState<PreviewFilter>("all");
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [status, setStatus] = useState("Страница ещё не проанализирована.");
@@ -100,6 +137,7 @@ function App() {
     () => manifest?.fields.filter((field) => field.sensitive).length ?? 0,
     [manifest],
   );
+  const sessionPage = useMemo(() => (session ? currentSessionPage(session) : null), [session]);
 
   const filteredPreviewItems = useMemo(() => {
     if (!preview) return [];
@@ -119,6 +157,11 @@ function App() {
     [result],
   );
 
+  const displayFieldId = (fieldId: string): string =>
+    sessionPage && manifest && session && sessionMatchesManifest(session, manifest)
+      ? qualifySessionFieldId(sessionPage.pageNumber, fieldId)
+      : fieldId;
+
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
     setError("");
@@ -131,15 +174,81 @@ function App() {
     }
   };
 
+  const ensurePageNotChanged = async (): Promise<void> => {
+    const ping = await callTab<{ status?: string }>("ping");
+    if (ping?.status === "PAGE_CHANGED") {
+      throw new Error("Страница изменилась. Нажмите «Анализировать» перед продолжением.");
+    }
+  };
+
   const analyze = () =>
     run(async () => {
       const next = await callTab<FormManifest>("scan");
       setManifest(next);
       setPreview(null);
+      setRequest(null);
       setResult(null);
       setPreviewExpanded(false);
       setPreviewFilter("all");
+
+      if (session) {
+        const relation = relationToSession(session, next);
+        if (relation.kind === "current") {
+          setSessionCandidate(null);
+          setStatus(`Сессия: страница ${relation.page.pageNumber}. Найдено полей: ${next.fields.length}.`);
+          return;
+        }
+
+        setSessionCandidate(next);
+        const targetPage = relation.kind === "known" ? relation.page.pageNumber : relation.suggestedPage;
+        setStatus(
+          relation.kind === "known"
+            ? `Обнаружена ранее посещённая страница ${targetPage}. Подтвердите переход в текущей сессии.`
+            : `Обнаружена новая форма. Можно продолжить текущую сессию как страницу ${targetPage}.`,
+        );
+        return;
+      }
+
+      setSessionCandidate(null);
       setStatus(`Найдено полей: ${next.fields.length}. Идентификаторы Fxx показаны на странице.`);
+    });
+
+  const startSession = () =>
+    run(async () => {
+      if (!manifest) throw new Error("Сначала проанализируйте первую страницу формы.");
+      const next = acceptManifestInSession(createFormSession(), manifest);
+      await persistActiveSession(next);
+      setSession(next);
+      setSessionCandidate(null);
+      setPreview(null);
+      setRequest(null);
+      setResult(null);
+      setStatus("Многостраничная сессия начата. Текущая форма — страница 1.");
+    });
+
+  const continueSession = () =>
+    run(async () => {
+      if (!session || !sessionCandidate) throw new Error("Нет новой страницы для продолжения сессии.");
+      const next = acceptManifestInSession(session, sessionCandidate);
+      await persistActiveSession(next);
+      setSession(next);
+      setSessionCandidate(null);
+      setPreview(null);
+      setRequest(null);
+      setResult(null);
+      const page = currentSessionPage(next);
+      setStatus(`Сессия продолжена: страница ${page?.pageNumber ?? next.currentPage}.`);
+    });
+
+  const endSession = () =>
+    run(async () => {
+      await persistActiveSession(null);
+      setSession(null);
+      setSessionCandidate(null);
+      setPreview(null);
+      setRequest(null);
+      setResult(null);
+      setStatus("Многостраничная сессия завершена. Текущие значения полей не сохранялись.");
     });
 
   const toggleNumbers = () =>
@@ -152,16 +261,35 @@ function App() {
   const copyForGpt = () =>
     run(async () => {
       if (!manifest) throw new Error("Сначала проанализируйте форму.");
+      await ensurePageNotChanged();
+      if (sessionCandidate) throw new Error("Сначала подтвердите продолжение сессии на этой странице или завершите сессию.");
+
+      if (session) {
+        const page = currentSessionPage(session);
+        if (!page || !sessionMatchesManifest(session, manifest)) {
+          throw new Error("Текущая форма не привязана к активной странице сессии.");
+        }
+        await navigator.clipboard.writeText(
+          makeGptPacket(manifest, { sessionId: session.id, pageNumber: page.pageNumber }),
+        );
+        setStatus(`Описание страницы ${page.pageNumber} с идентификаторами P${page.pageNumber}-Fxx скопировано для GPT.`);
+        return;
+      }
+
       await navigator.clipboard.writeText(makeGptPacket(manifest));
       setStatus("Описание формы и инструкция для GPT скопированы в буфер.");
     });
 
   const applyParsedPreview = async (text: string): Promise<void> => {
     if (!manifest) throw new Error("Сначала проанализируйте текущую форму.");
+    await ensurePageNotChanged();
+    if (sessionCandidate) throw new Error("Сначала подтвердите продолжение сессии на этой странице или завершите сессию.");
+
     const parsed = parseFillRequest(text);
-    const nextPreview = await callTab<PreviewResult>("preview", parsed);
+    const localRequest = session ? normalizeSessionFillRequest(parsed, session, manifest) : parsed;
+    const nextPreview = await callTab<PreviewResult>("preview", localRequest);
     setJsonText(text);
-    setRequest(parsed);
+    setRequest(localRequest);
     setPreview(nextPreview);
     setResult(null);
     setPreviewExpanded(false);
@@ -183,12 +311,21 @@ function App() {
   const fill = () =>
     run(async () => {
       if (!manifest || !request || !preview) throw new Error("Сначала загрузите JSON и проверьте preview.");
+      await ensurePageNotChanged();
+      if (sessionCandidate) throw new Error("Сначала подтвердите текущую страницу сессии.");
       if (preview.pageMismatch) throw new Error("Fingerprint страницы отличается. Выполните анализ заново и получите новый JSON.");
       if (preview.counts.error > 0) throw new Error("В preview есть ошибки. Исправьте JSON перед заполнением.");
 
       const next = await callTab<FillResult>("fill", request);
       setResult(next);
       setHistory(await saveHistory(manifest, next));
+
+      if (session) {
+        const updatedSession = recordSessionFillResult(session, manifest, next);
+        await persistActiveSession(updatedSession);
+        setSession(updatedSession);
+      }
+
       setStatus(
         `Заполнение завершено: ${next.filled} изменено, ${next.same} уже совпадало, ${next.review} проверить, ${next.errors} ошибок.`,
       );
@@ -196,6 +333,7 @@ function App() {
 
   const undo = () =>
     run(async () => {
+      await ensurePageNotChanged();
       const undoResult = await callTab<UndoResult>("undo");
       setResult(null);
       setStatus(`Отменено изменений: ${undoResult.restored}. Ошибок: ${undoResult.errors}.`);
@@ -204,8 +342,15 @@ function App() {
   const copyResultForGpt = () =>
     run(async () => {
       if (!manifest || !result) throw new Error("Нет результата заполнения для отчёта.");
-      await navigator.clipboard.writeText(stringifyGptFeedbackReport(manifest, result));
-      setStatus("Отчёт о проблемных Fxx скопирован для ChatGPT. Защищённые поля исключены.");
+      const page = session ? currentSessionPage(session) : null;
+      const options = page && sessionMatchesManifest(session!, manifest)
+        ? {
+            mapId: (id: string) => qualifySessionFieldId(page.pageNumber, id),
+            session: { id: session!.id, page: page.pageNumber },
+          }
+        : undefined;
+      await navigator.clipboard.writeText(stringifyGptFeedbackReport(manifest, result, options));
+      setStatus("Отчёт о проблемных полях скопирован для ChatGPT. Защищённые поля исключены.");
     });
 
   const highlightProblems = () =>
@@ -240,7 +385,14 @@ function App() {
   };
 
   useEffect(() => {
-    void loadHistory().then(setHistory);
+    void Promise.all([loadHistory(), loadActiveSession()]).then(([storedHistory, storedSession]) => {
+      setHistory(storedHistory);
+      setSession(storedSession);
+      if (storedSession) {
+        const page = currentSessionPage(storedSession);
+        setStatus(`Восстановлена локальная сессия${page ? `, страница ${page.pageNumber}` : ""}. Проанализируйте текущую форму.`);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -250,7 +402,7 @@ function App() {
     };
     browser.storage.onChanged.addListener(listener);
     return () => browser.storage.onChanged.removeListener(listener);
-  }, [manifest, request, preview]);
+  }, [manifest, request, preview, session, sessionCandidate]);
 
   return (
     <main class="app">
@@ -277,13 +429,56 @@ function App() {
         )}
       </section>
 
+      <section class={`card session-card ${sessionCandidate ? "warning" : ""}`}>
+        {session ? (
+          <>
+            <div class="section-head">
+              <div>
+                <strong>Многостраничная сессия</strong>
+                <div class="small">
+                  {sessionPage ? `Страница ${sessionPage.pageNumber}` : "Ожидается первая страница"} · {session.pages.length} стр. · {session.id.slice(0, 8)}
+                </div>
+              </div>
+              <button class="text-button danger compact" disabled={busy} onClick={endSession}>Завершить</button>
+            </div>
+
+            {sessionCandidate && (
+              <div class="session-candidate">
+                <strong>Обнаружена другая форма</strong>
+                <p class="small">Она не станет следующей страницей сессии без вашего подтверждения.</p>
+                <button class="primary" disabled={busy} onClick={continueSession}>Продолжить текущую сессию</button>
+              </div>
+            )}
+
+            {session.pages.length > 0 && (
+              <div class="session-pages">
+                {session.pages.map((page) => (
+                  <span class={page.pageNumber === session.currentPage ? "selected" : ""} key={page.pageNumber}>
+                    P{page.pageNumber} · {page.fieldCount}
+                    {page.completedAt ? ` · ${page.errors ? `${page.errors} ✕` : "✓"}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div class="section-head">
+            <div>
+              <strong>Многостраничная анкета</strong>
+              <div class="small">Опционально: P1-Fxx, P2-Fxx… без автоматического перехода между страницами.</div>
+            </div>
+            <button disabled={busy || !manifest} onClick={startSession}>Начать сессию</button>
+          </div>
+        )}
+      </section>
+
       <section class="actions main">
         <button class="primary" disabled={busy} onClick={analyze}>1. Анализировать</button>
         <button disabled={busy || !manifest} onClick={toggleNumbers}>
           2. {overlayVisible ? "Скрыть номера" : "Показать номера"}
         </button>
-        <button disabled={busy || !manifest} onClick={copyForGpt}>3. Скопировать для GPT</button>
-        <button disabled={busy || !manifest} onClick={pasteClipboard}>4. Вставить ответ</button>
+        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={copyForGpt}>3. Скопировать для GPT</button>
+        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={pasteClipboard}>4. Вставить ответ</button>
       </section>
 
       {preview && (
@@ -312,7 +507,7 @@ function App() {
             <div class="preview">
               {visiblePreviewItems.map((item) => (
                 <div class="preview-item" key={item.id}>
-                  <div class="preview-id">{item.id}</div>
+                  <div class="preview-id">{displayFieldId(item.id)}</div>
                   <div class="preview-values">
                     <strong>{item.label}</strong>
                     <div>Сейчас: {shortValue(item.currentValue)}</div>
@@ -336,7 +531,7 @@ function App() {
           <div class="actions" style="margin-top:8px">
             <button
               class="primary"
-              disabled={busy || preview.pageMismatch || preview.counts.error > 0}
+              disabled={busy || preview.pageMismatch || preview.counts.error > 0 || Boolean(sessionCandidate)}
               onClick={fill}
             >
               5. Заполнить {preview.counts.ok} полей
@@ -365,7 +560,7 @@ function App() {
               <div class="problem-list">
                 {problemResults.map((item) => (
                   <div class="problem-item" key={item.id}>
-                    <strong>{item.id} — {item.label}</strong>
+                    <strong>{displayFieldId(item.id)} — {item.label}</strong>
                     <span>{item.message ?? (item.status === "review" ? "Требуется проверка." : "Не удалось заполнить поле.")}</span>
                   </div>
                 ))}
@@ -393,7 +588,7 @@ function App() {
             placeholder="Вставьте JSON вручную, если буфер недоступен"
           />
           <div class="actions" style="margin-top:7px">
-            <button disabled={busy || !jsonText.trim()} onClick={() => parseAndPreview(jsonText)}>
+            <button disabled={busy || !jsonText.trim() || Boolean(sessionCandidate)} onClick={() => parseAndPreview(jsonText)}>
               Проверить JSON
             </button>
           </div>
