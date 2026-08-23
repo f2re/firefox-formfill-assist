@@ -29,36 +29,50 @@ interface ActiveTab extends browser.tabs.Tab {
 const PANEL_CSS = `
 #ai-handoff-root { position: relative; z-index: 50; }
 .ai-handoff-fab {
-  position: fixed; right: 12px; bottom: 12px; z-index: 1000;
-  min-height: 38px; padding: 8px 12px; border-radius: 999px;
-  border-color: #1f6feb; background: #1f6feb; color: #fff; font-weight: 700;
-  box-shadow: 0 5px 18px rgba(15,23,42,.22);
+  position: fixed; right: 14px; bottom: 14px; z-index: 1000;
+  min-height: 42px; padding: 9px 14px 9px 12px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.24);
+  background: linear-gradient(135deg,#0f6cf2 0%,#16bfd2 56%,#6748ed 100%);
+  color:#fff; font-weight:760; letter-spacing:-.01em;
+  box-shadow:0 12px 28px rgba(25,94,194,.30), inset 0 1px 0 rgba(255,255,255,.22);
 }
+.ai-handoff-fab::before {
+  content:"✦"; display:inline-grid; place-items:center; width:22px; height:22px;
+  margin-right:7px; border-radius:7px; background:rgba(255,255,255,.18); font-size:13px;
+}
+.ai-handoff-fab:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 15px 32px rgba(25,94,194,.36); }
 .ai-handoff-panel {
-  position: fixed; left: 10px; right: 10px; bottom: 58px; z-index: 999;
-  max-height: min(72vh, 620px); overflow: auto;
-  background: #fff; border: 1px solid #cbd5e1; border-radius: 12px;
-  padding: 10px; box-shadow: 0 12px 34px rgba(15,23,42,.24);
+  position:fixed; left:10px; right:10px; bottom:66px; z-index:999;
+  max-height:min(76vh,680px); overflow:auto;
+  background:rgba(255,255,255,.97); border:1px solid #d7e3f2; border-radius:18px;
+  padding:12px; box-shadow:0 22px 54px rgba(16,42,86,.24); backdrop-filter:blur(18px);
 }
-.ai-handoff-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
-.ai-handoff-head button { width:auto; min-height:28px; padding:4px 8px; }
-.ai-handoff-preview {
-  display:block; width:100%; max-height:220px; object-fit:contain; margin-top:8px;
-  border:1px solid #d7dde5; border-radius:8px; background:#eef2f7;
-}
-.ai-handoff-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; }
+.ai-handoff-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.ai-handoff-brand { display:flex; align-items:center; gap:9px; min-width:0; }
+.ai-handoff-logo { width:38px; height:38px; flex:0 0 auto; filter:drop-shadow(0 4px 8px rgba(26,86,170,.16)); }
+.ai-handoff-title { font-size:13px; font-weight:790; color:#192a4b; }
+.ai-handoff-head button { width:auto; min-height:30px; padding:4px 9px; border-radius:9px; }
+.ai-handoff-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:10px; }
+.ai-handoff-step { padding:7px; border:1px solid #e1eaf5; border-radius:10px; background:#f7faff; font-size:9.5px; line-height:1.3; color:#61718a; }
+.ai-handoff-step strong { display:block; margin-bottom:2px; color:#245bad; font-size:10px; }
+.ai-handoff-preview { display:block; width:100%; max-height:250px; object-fit:contain; margin-top:10px; border:1px solid #d7e3f2; border-radius:12px; background:#edf3fa; box-shadow:inset 0 0 0 1px rgba(255,255,255,.55); }
+.ai-handoff-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:9px; }
 .ai-handoff-actions .wide { grid-column:1 / -1; }
-.ai-handoff-template {
-  width:100%; margin-top:7px; min-height:32px; padding:6px 8px;
-  border-style:dashed; background:transparent; font-size:11px;
-}
-.ai-handoff-note { margin:7px 0 0; font-size:11px; line-height:1.45; color:#64748b; }
-.ai-handoff-error { margin-top:8px; padding:7px; border-radius:7px; background:#fff1f2; color:#9f1239; font-size:11px; }
-.ai-handoff-ok { margin-top:7px; padding:7px; border-radius:7px; background:#f0fdf4; color:#166534; font-size:11px; }
+.ai-handoff-template { width:100%; margin-top:7px; min-height:34px; padding:7px 9px; border-style:dashed; background:rgba(244,248,254,.7); font-size:10.5px; color:#536985; }
+.ai-handoff-note { margin:8px 0 0; font-size:10.5px; line-height:1.48; color:#687891; }
+.ai-handoff-error { margin-top:9px; padding:8px 9px; border:1px solid #efbdc6; border-radius:10px; background:#fff2f5; color:#aa2d47; font-size:10.5px; }
+.ai-handoff-ok { margin-top:9px; padding:8px 9px; border:1px solid #bce2d0; border-radius:10px; background:#f0fbf6; color:#18704e; font-size:10.5px; }
+@media (max-width:319px){ .ai-handoff-steps{grid-template-columns:1fr;} .ai-handoff-actions{grid-template-columns:1fr;} .ai-handoff-actions .wide{grid-column:auto;} }
 @media (prefers-color-scheme: dark) {
-  .ai-handoff-panel { background:#161b22; border-color:#374151; color:#e5e7eb; }
-  .ai-handoff-preview { background:#0f172a; border-color:#374151; }
-  .ai-handoff-note { color:#94a3b8; }
+  .ai-handoff-panel { background:rgba(20,28,41,.98); border-color:#33445b; color:#edf5ff; }
+  .ai-handoff-title { color:#edf5ff; }
+  .ai-handoff-step { background:#182337; border-color:#2d3d54; color:#aab7ca; }
+  .ai-handoff-step strong { color:#8ebcff; }
+  .ai-handoff-preview { background:#101827; border-color:#33445b; }
+  .ai-handoff-template { background:#172134; border-color:#3a4a62; color:#b1bfd1; }
+  .ai-handoff-note { color:#a7b4c8; }
+  .ai-handoff-error { background:#351f2a; border-color:#623748; color:#ffc4d0; }
+  .ai-handoff-ok { background:#153026; border-color:#2b5a47; color:#b9efd5; }
 }
 `;
 
@@ -184,8 +198,8 @@ function AiHandoff() {
       setHandoff(next);
       setStatus(
         screenshotCopied
-          ? "Снимок готов и уже скопирован. Вставьте его в vision-ИИ, затем скопируйте промпт."
-          : "Снимок готов. Копирование изображения недоступно — используйте «Скачать PNG».",
+          ? "Готово: PNG уже в буфере. Вставьте его в vision-ИИ и затем скопируйте динамический промпт."
+          : "Снимок готов. Если Firefox не дал положить PNG в буфер, используйте «Скачать PNG».",
       );
 
       await browser.storage.local.set({
@@ -205,14 +219,14 @@ function AiHandoff() {
     void run(async () => {
       if (!handoff) throw new Error("Сначала подготовьте снимок — промпт должен соответствовать этому fingerprint.");
       await navigator.clipboard.writeText(handoff.prompt);
-      setStatus("Промпт скопирован. Вставьте его в тот же диалог ИИ после изображения.");
+      setStatus("Динамический промпт скопирован. Вставьте его в тот же диалог ИИ после изображения.");
     });
 
   const copyPortableTemplate = () =>
     void run(async () => {
       await navigator.clipboard.writeText(makePortableAiPromptTemplate());
       setStatus(
-        "Универсальный шаблон скопирован. Для реального заполнения замените placeholder [FORM_MANIFEST] актуальным manifest; для текущей формы безопаснее использовать динамический «Скопировать промпт».",
+        "Универсальный шаблон скопирован. Для реального заполнения нужен актуальный [FORM_MANIFEST]; для текущей формы используйте динамический промпт.",
       );
     });
 
@@ -226,22 +240,31 @@ function AiHandoff() {
       {open && (
         <section class="ai-handoff-panel" aria-label="Подготовка формы для ИИ">
           <div class="ai-handoff-head">
-            <div>
-              <strong>Для vision-ИИ</strong>
-              <div class="small">Снимок видимой области + строгий JSON-контракт</div>
+            <div class="ai-handoff-brand">
+              <img class="ai-handoff-logo" src="../icons/formfill.svg" alt="" />
+              <div>
+                <div class="ai-handoff-title">Подготовить форму для vision-ИИ</div>
+                <div class="small">Приватный screenshot + строгий JSON-контракт</div>
+              </div>
             </div>
-            <button disabled={busy} onClick={() => setOpen(false)}>×</button>
+            <button disabled={busy} onClick={() => setOpen(false)} aria-label="Закрыть">×</button>
+          </div>
+
+          <div class="ai-handoff-steps" aria-label="Порядок работы">
+            <div class="ai-handoff-step"><strong>1 · Подготовить</strong>Сканируем форму, показываем Fxx и маскируем текущие значения.</div>
+            <div class="ai-handoff-step"><strong>2 · Передать ИИ</strong>Вставьте PNG и динамический промпт в один диалог vision-ИИ.</div>
+            <div class="ai-handoff-step"><strong>3 · Вернуть JSON</strong>Скопируйте ответ ИИ и нажмите «Вставить ответ» в sidebar.</div>
           </div>
 
           <p class="ai-handoff-note">
-            Перед снимком расширение временно закрывает содержимое видимых полей privacy-масками, но оставляет подписи и метки Fxx/Pn-Fxx. Ничего не отправляется автоматически.
+            Расширение ничего не отправляет наружу само. Текущие значения видимых editable-полей закрываются локальными privacy-масками перед снимком.
           </p>
 
-          <button class="primary" style="width:100%; margin-top:8px" disabled={busy} onClick={capture}>
-            {handoff ? "Переснять и обновить промпт" : "Подготовить снимок и промпт"}
+          <button class="primary" style="width:100%; margin-top:9px" disabled={busy} onClick={capture}>
+            {handoff ? "Переснять и обновить ИИ-пакет" : "Подготовить снимок и промпт"}
           </button>
           <button class="ai-handoff-template" disabled={busy} onClick={copyPortableTemplate}>
-            Скопировать универсальный шаблон для ИИ
+            Универсальный шаблон для внешней интеграции
           </button>
 
           {error && <div class="ai-handoff-error" role="alert">{error}</div>}
@@ -255,7 +278,7 @@ function AiHandoff() {
               </p>
               {handoff.unsupportedCrossOriginFrames > 0 && (
                 <div class="ai-handoff-error">
-                  На странице есть cross-origin iframe: {handoff.unsupportedCrossOriginFrames}. Их содержимое нельзя надёжно замаскировать; проверьте изображение перед передачей ИИ.
+                  На странице есть cross-origin iframe: {handoff.unsupportedCrossOriginFrames}. Их содержимое нельзя надёжно замаскировать; проверьте PNG перед передачей ИИ.
                 </div>
               )}
               <div class="ai-handoff-actions">
@@ -266,7 +289,7 @@ function AiHandoff() {
                 </button>
               </div>
               <p class="ai-handoff-note">
-                Порядок: вставьте PNG в ChatGPT/Claude/Gemini → вставьте промпт → скопируйте полученный JSON → вернитесь к форме и нажмите «Вставить ответ».
+                После ответа ИИ вернитесь в sidebar: «Вставить ответ» → обязательный preview → «Заполнить». Submit/Next всегда остаются ручными.
               </p>
             </>
           )}
