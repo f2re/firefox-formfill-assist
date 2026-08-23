@@ -1,6 +1,17 @@
 import { bestTextMatch, normalizeText } from "../shared/normalize";
 import { isInput } from "./dom";
 
+export const AUTO_MATCH_THRESHOLD = 0.95;
+export const REVIEW_MATCH_THRESHOLD = 0.75;
+
+export type MatchDisposition = "auto" | "review" | "reject";
+
+export function matchDisposition(confidence: number): MatchDisposition {
+  if (confidence >= AUTO_MATCH_THRESHOLD) return "auto";
+  if (confidence >= REVIEW_MATCH_THRESHOLD) return "review";
+  return "reject";
+}
+
 export interface OptionMatch {
   value: string;
   label: string;
