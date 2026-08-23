@@ -1,6 +1,7 @@
 import type { FieldHandle } from "./scanner";
 import type { PrimitiveFillValue } from "../shared/types";
 import { getElementLabel } from "./labels";
+import { eventFor, isInput, isSelect, isTextArea } from "./dom";
 
 export function readValue(handle: FieldHandle): PrimitiveFillValue {
   const element = handle.elements[0];
@@ -9,38 +10,36 @@ export function readValue(handle: FieldHandle): PrimitiveFillValue {
   if (handle.descriptor.type === "protected") return null;
 
   if (handle.descriptor.type === "radio") {
-    const selected = handle.elements.find(
-      (candidate) => candidate instanceof HTMLInputElement && candidate.checked,
-    );
-    if (!(selected instanceof HTMLInputElement)) return null;
+    const selected = handle.elements.find((candidate) => isInput(candidate) && candidate.checked);
+    if (!selected || !isInput(selected)) return null;
     return getElementLabel(selected) || selected.value;
   }
 
-  if (element instanceof HTMLInputElement) {
+  if (isInput(element)) {
     if (element.type === "checkbox") return element.checked;
     return element.value;
   }
-  if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return element.value;
+  if (isTextArea(element) || isSelect(element)) return element.value;
   if (element.isContentEditable) return element.textContent ?? "";
   return element.getAttribute("aria-valuetext") ?? element.textContent ?? "";
 }
 
-function nativeSetter(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, property: "value" | "checked"): ((value: unknown) => void) | null {
-  const prototype =
-    element instanceof HTMLInputElement
-      ? HTMLInputElement.prototype
-      : element instanceof HTMLTextAreaElement
-        ? HTMLTextAreaElement.prototype
-        : HTMLSelectElement.prototype;
-
-  const descriptor = Object.getOwnPropertyDescriptor(prototype, property);
-  if (!descriptor?.set) return null;
-  return descriptor.set.bind(element);
+function nativeSetter(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  property: "value" | "checked",
+): ((value: unknown) => void) | null {
+  let prototype: object | null = Object.getPrototypeOf(element) as object | null;
+  while (prototype) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, property);
+    if (descriptor?.set) return descriptor.set.bind(element);
+    prototype = Object.getPrototypeOf(prototype) as object | null;
+  }
+  return null;
 }
 
 function dispatchValueEvents(element: HTMLElement): void {
-  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-  element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  element.dispatchEvent(eventFor(element, "input", { bubbles: true, composed: true }));
+  element.dispatchEvent(eventFor(element, "change", { bubbles: true, composed: true }));
 }
 
 export function setInputValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
