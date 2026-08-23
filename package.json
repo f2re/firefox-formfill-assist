@@ -1,9 +1,9 @@
 {
   "name": "firefox-formfill-assist",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Firefox extension that deterministically fills forms from Fxx-based JSON prepared by ChatGPT.",
+  "description": "Firefox extension that safely fills forms from schema-strict JSON prepared by vision AI.",
   "scripts": {
     "build": "node scripts/build.mjs",
     "package": "node scripts/package.mjs",
