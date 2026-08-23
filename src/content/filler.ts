@@ -11,7 +11,7 @@ import { normalizeText } from "../shared/normalize";
 import type { ScanState } from "./scanner";
 import { scanDocument } from "./scanner";
 import { readValue, setChecked, setContentEditable, setInputValue, setSelectValue } from "./values";
-import { formatDateForElement, matchRadioOption, matchSelectOption } from "./match";
+import { formatDateForElement, matchDisposition, matchRadioOption, matchSelectOption } from "./match";
 import { fillCombobox } from "./combobox";
 import { isInput, isSelect, isTextArea } from "./dom";
 
@@ -40,6 +40,31 @@ function booleanValue(value: PrimitiveFillValue): boolean {
   if (typeof value === "boolean") return value;
   const normalized = normalizeText(value);
   return ["true", "1", "yes", "да", "on", "checked"].includes(normalized);
+}
+
+function unsafeMatchResult(
+  id: string,
+  label: string,
+  value: PrimitiveFillValue,
+  kind: "Radio" | "Select",
+  confidence?: number,
+): FillFieldResult {
+  if (confidence !== undefined && matchDisposition(confidence) === "review") {
+    return {
+      id,
+      label,
+      status: "review",
+      requestedValue: value,
+      message: `${kind}-вариант найден с уверенностью ${Math.round(confidence * 100)}%. Автоматическая запись запрещена — требуется проверка.`,
+    };
+  }
+  return {
+    id,
+    label,
+    status: "error",
+    requestedValue: value,
+    message: `${kind}-вариант не найден с достаточной уверенностью.`,
+  };
 }
 
 async function applyOne(state: ScanState, id: string, raw: PrimitiveFillValue | FillOperation): Promise<FillFieldResult> {
@@ -76,15 +101,15 @@ async function applyOne(state: ScanState, id: string, raw: PrimitiveFillValue | 
       expectedActual = checked;
     } else if (handle.descriptor.type === "radio") {
       const match = matchRadioOption(handle.elements, value);
-      if (!match || match.confidence < 0.75) {
-        return { id, label: handle.descriptor.label, status: "review", requestedValue: value, message: "Radio-вариант неоднозначен." };
+      if (!match || matchDisposition(match.confidence) !== "auto") {
+        return unsafeMatchResult(id, handle.descriptor.label, value, "Radio", match?.confidence);
       }
       setChecked(match.element, true);
       expectedActual = match.label;
     } else if (isSelect(element)) {
       const match = matchSelectOption(element, value);
-      if (!match || match.confidence < 0.75) {
-        return { id, label: handle.descriptor.label, status: "review", requestedValue: value, message: "Select-вариант неоднозначен." };
+      if (!match || matchDisposition(match.confidence) !== "auto") {
+        return unsafeMatchResult(id, handle.descriptor.label, value, "Select", match?.confidence);
       }
       setSelectValue(element, match.value);
       expectedActual = match.value;
@@ -94,10 +119,11 @@ async function applyOne(state: ScanState, id: string, raw: PrimitiveFillValue | 
       verificationMessage = result.message;
       expectedActual = result.actual ?? result.expected ?? value;
       if (!result.ok) {
+        const disposition = result.confidence === undefined ? "review" : matchDisposition(result.confidence);
         return {
           id,
           label: handle.descriptor.label,
-          status: "review",
+          status: disposition === "reject" ? "error" : "review",
           requestedValue: value,
           actualValue: result.actual,
           message: result.message,
