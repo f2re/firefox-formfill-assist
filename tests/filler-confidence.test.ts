@@ -35,15 +35,22 @@ function installDom(): { dom: JSDOM; select: HTMLSelectElement } {
   return { dom, select };
 }
 
+function selectFieldId(): string {
+  const state = scanDocument(0);
+  const field = state.manifest.fields.find((item) => item.type === "select");
+  if (!field) throw new Error("Select fixture was not discovered");
+  return field.id;
+}
+
 describe("fill option confidence safety", () => {
   it("does not write a select option in the review confidence band", async () => {
     const { select } = installDom();
     const state = scanDocument(0);
-    const field = state.manifest.fields.find((item) => item.label === "Регион")!;
+    const fieldId = state.manifest.fields.find((item) => item.type === "select")?.id ?? selectFieldId();
 
     const result = await fillRequest(
       state,
-      { version: 1, fields: { [field.id]: "Санкт-Петербург" } },
+      { version: 1, fields: { [fieldId]: "Санкт-Петербург" } },
       0,
     );
 
@@ -55,11 +62,11 @@ describe("fill option confidence safety", () => {
   it("still writes an exact select option", async () => {
     const { select } = installDom();
     const state = scanDocument(0);
-    const field = state.manifest.fields.find((item) => item.label === "Регион")!;
+    const fieldId = state.manifest.fields.find((item) => item.type === "select")?.id ?? selectFieldId();
 
     const result = await fillRequest(
       state,
-      { version: 1, fields: { [field.id]: "Москва" } },
+      { version: 1, fields: { [fieldId]: "Москва" } },
       0,
     );
 
