@@ -8,6 +8,13 @@ export function normalizeText(value: unknown): string {
     .trim();
 }
 
+function stripAdministrativeTokens(value: string): string {
+  return value
+    .replace(/(?:^|\s)(?:г|город|обл|область)(?=\s|$)/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;
@@ -34,8 +41,8 @@ export function matchConfidence(requested: unknown, candidate: unknown): number 
   if (!left || !right) return 0;
   if (left === right) return 1;
 
-  const leftCompact = left.replace(/\b(г|город|обл|область)\b/g, "").replace(/\s+/g, " ").trim();
-  const rightCompact = right.replace(/\b(г|город|обл|область)\b/g, "").replace(/\s+/g, " ").trim();
+  const leftCompact = stripAdministrativeTokens(left);
+  const rightCompact = stripAdministrativeTokens(right);
   if (leftCompact && leftCompact === rightCompact) return 0.99;
 
   if (left.startsWith(right) || right.startsWith(left)) {
