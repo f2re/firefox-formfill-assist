@@ -91,7 +91,7 @@ test("fills standard controls, verifies actual state and never submits", async (
     request,
   ) as any;
   expect(preview.pageMismatch).toBe(false);
-  expect(preview.counts.error).toBe(0);
+  expect(preview.items.filter((item: any) => item.status === "error")).toEqual([]);
 
   const result = await page.evaluate(
     (payload) => (window as unknown as HarnessWindow).__formfillE2E.fill(payload),
