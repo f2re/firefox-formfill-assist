@@ -68,7 +68,7 @@ jobs:
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E, validation, AMO signing and gated build. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --body "Release ${{ steps.meta.outputs.tag }} accepted. Running Firefox E2E, validation, AMO signing, AMO icon sync and gated build. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
   firefox-e2e:
     needs: prepare
@@ -116,6 +116,7 @@ jobs:
       WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      AMO_ADDON_GUID: firefox-formfill-assist@f2re.github
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -184,6 +185,43 @@ jobs:
           )
           echo "AMO signed XPI: ${FRIENDLY_XPI}"
 
+      - name: Sync AMO product icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          AMO_ICON=/tmp/formfill-amo-icon.png
+          RESPONSE=/tmp/amo-icon-response.json
+
+          base64 --decode src/icons/formfill-128.png.b64 > "${AMO_ICON}"
+          test -s "${AMO_ICON}"
+          SIGNATURE=$(head -c 8 "${AMO_ICON}" | od -An -t x1 | tr -d ' \n')
+          if [[ "${SIGNATURE}" != "89504e470d0a1a0a" ]]; then
+            echo "::error title=Invalid AMO icon::Decoded branding asset is not a PNG."
+            exit 1
+          fi
+
+          TOKEN=$(node scripts/amo-jwt.mjs)
+          HTTP_CODE=$(curl -sS \
+            --retry 3 \
+            --retry-all-errors \
+            -o "${RESPONSE}" \
+            -w '%{http_code}' \
+            -X PATCH \
+            -H "Authorization: JWT ${TOKEN}" \
+            -F "icon=@${AMO_ICON};type=image/png" \
+            "https://addons.mozilla.org/api/v5/addons/addon/firefox-formfill-assist%40f2re.github/")
+
+          case "${HTTP_CODE}" in
+            200|201|202|204)
+              echo "AMO product icon accepted (HTTP ${HTTP_CODE})."
+              ;;
+            *)
+              echo "::error title=AMO product icon sync failed::AMO returned HTTP ${HTTP_CODE}."
+              cat "${RESPONSE}" || true
+              exit 1
+              ;;
+          esac
+
       - name: Create or verify immutable release tag
         shell: bash
         run: |
@@ -239,7 +277,7 @@ jobs:
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "Published signed ${RELEASE_TAG}: Firefox E2E, checks, Mozilla lint, deterministic packaging and AMO signing completed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --body "Published signed ${RELEASE_TAG}: Firefox E2E, checks, Mozilla lint, deterministic packaging, AMO signing and AMO product icon sync completed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
   notify-failure:
     needs: [prepare, firefox-e2e, release]
@@ -252,4 +290,4 @@ jobs:
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "Release ${{ needs.prepare.outputs.tag }} failed a gate. Firefox E2E=${{ needs.firefox-e2e.result }}, release=${{ needs.release.result }}. Check AMO signing credentials and run logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --body "Release ${{ needs.prepare.outputs.tag }} failed a gate. Firefox E2E=${{ needs.firefox-e2e.result }}, release=${{ needs.release.result }}. Check AMO signing/icon sync and run logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
