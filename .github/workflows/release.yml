@@ -9,6 +9,8 @@ on:
       - "src/manifest.json"
       - ".github/workflows/release.yml"
   workflow_dispatch:
+  issues:
+    types: ["opened"]
 
 permissions:
   contents: write
@@ -33,6 +35,8 @@ jobs:
       - name: Resolve release version
         id: meta
         shell: bash
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
@@ -41,6 +45,10 @@ jobs:
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             RELEASE_NEEDED=true
+          elif [[ "${GITHUB_EVENT_NAME}" == "issues" ]]; then
+            if [[ "${ISSUE_TITLE}" == "[release] ${TAG}" ]]; then
+              RELEASE_NEEDED=true
+            fi
           else
             PREVIOUS_VERSION=$(git show "${GITHUB_SHA}^:package.json" | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>console.log(JSON.parse(s).version));")
             if [[ "${PREVIOUS_VERSION}" != "${VERSION}" ]]; then
