@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   firefox-e2e:
@@ -21,10 +21,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Install Playwright Firefox
         run: npx playwright install --with-deps firefox
@@ -55,31 +56,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Bootstrap generated lockfile to release branch
-        if: github.event_name == 'pull_request' && github.head_ref == 'agent/release-engineering'
-        env:
-          HEAD_BRANCH: ${{ github.head_ref }}
-        run: |
-          if git ls-remote --exit-code origin "refs/heads/$HEAD_BRANCH" >/dev/null 2>&1; then
-            cp package-lock.json /tmp/package-lock.json
-            git fetch origin "$HEAD_BRANCH"
-            git checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
-            if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
-              echo "package-lock.json is already tracked; bootstrap skipped."
-            else
-              cp /tmp/package-lock.json package-lock.json
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git add package-lock.json
-              git commit -m "chore: add generated npm lockfile"
-              git push origin "HEAD:$HEAD_BRANCH"
-            fi
-          fi
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck and unit tests
         run: npm run check
@@ -93,12 +74,10 @@ jobs:
       - name: Package ZIP and XPI
         run: npm run package
 
-      - name: Upload Firefox build and generated lockfile
+      - name: Upload Firefox build
         uses: actions/upload-artifact@v7
         with:
           name: firefox-formfill-assist-${{ github.sha }}
-          path: |
-            artifacts/*
-            package-lock.json
+          path: artifacts/*
           if-no-files-found: error
           retention-days: 30
