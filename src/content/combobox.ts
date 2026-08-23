@@ -55,8 +55,9 @@ function optionElements(element: HTMLElement): HTMLElement[] {
   const options: HTMLElement[] = [];
 
   for (const root of searchRoots) {
-    if (root instanceof Element && root.matches(OPTION_SELECTOR)) {
-      const candidate = root as HTMLElement;
+    const rootElement = root as Element;
+    if (typeof rootElement.matches === "function" && rootElement.matches(OPTION_SELECTOR)) {
+      const candidate = rootElement as HTMLElement;
       if (!seen.has(candidate) && isVisible(candidate) && !isUnsafeOption(candidate)) {
         seen.add(candidate);
         options.push(candidate);
