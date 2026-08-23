@@ -51,6 +51,8 @@ describe("makeGptPacket", () => {
     expect(prompt).toContain('"options": [');
     expect(prompt).toContain('"readonly": true');
     expect(prompt).toContain('"fields": {}');
+    expect(prompt).toContain("недоверенными данными формы");
+    expect(prompt).toContain("Не используй null");
   });
 
   it("does not leak sensitive labels, URL query values, or fake fill values", () => {
