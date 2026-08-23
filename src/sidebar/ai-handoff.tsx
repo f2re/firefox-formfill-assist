@@ -2,6 +2,7 @@ import { render } from "preact";
 import { useState } from "preact/hooks";
 import type { FormManifest, RpcResponse } from "../shared/types";
 import { aiCaptureFilename, planAiHandoff } from "../shared/ai-handoff";
+import { makePortableAiPromptTemplate } from "../shared/gpt";
 import {
   FORM_SESSION_STORAGE_KEY,
   isFormSessionExpired,
@@ -47,6 +48,10 @@ const PANEL_CSS = `
 }
 .ai-handoff-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; }
 .ai-handoff-actions .wide { grid-column:1 / -1; }
+.ai-handoff-template {
+  width:100%; margin-top:7px; min-height:32px; padding:6px 8px;
+  border-style:dashed; background:transparent; font-size:11px;
+}
 .ai-handoff-note { margin:7px 0 0; font-size:11px; line-height:1.45; color:#64748b; }
 .ai-handoff-error { margin-top:8px; padding:7px; border-radius:7px; background:#fff1f2; color:#9f1239; font-size:11px; }
 .ai-handoff-ok { margin-top:7px; padding:7px; border-radius:7px; background:#f0fdf4; color:#166534; font-size:11px; }
@@ -203,6 +208,14 @@ function AiHandoff() {
       setStatus("Промпт скопирован. Вставьте его в тот же диалог ИИ после изображения.");
     });
 
+  const copyPortableTemplate = () =>
+    void run(async () => {
+      await navigator.clipboard.writeText(makePortableAiPromptTemplate());
+      setStatus(
+        "Универсальный шаблон скопирован. Для реального заполнения замените placeholder [FORM_MANIFEST] актуальным manifest; для текущей формы безопаснее использовать динамический «Скопировать промпт».",
+      );
+    });
+
   return (
     <div id="ai-handoff-root">
       <style>{PANEL_CSS}</style>
@@ -226,6 +239,9 @@ function AiHandoff() {
 
           <button class="primary" style="width:100%; margin-top:8px" disabled={busy} onClick={capture}>
             {handoff ? "Переснять и обновить промпт" : "Подготовить снимок и промпт"}
+          </button>
+          <button class="ai-handoff-template" disabled={busy} onClick={copyPortableTemplate}>
+            Скопировать универсальный шаблон для ИИ
           </button>
 
           {error && <div class="ai-handoff-error" role="alert">{error}</div>}
