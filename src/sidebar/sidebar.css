@@ -1,0 +1,172 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1f2937;
+  background: #f7f8fa;
+  color-scheme: light dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 260px;
+  background: #f7f8fa;
+  color: #1f2937;
+}
+
+button, textarea { font: inherit; }
+
+.app {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.title { font-size: 16px; font-weight: 750; }
+.version { font-size: 11px; color: #6b7280; }
+
+.card {
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  font-size: 12px;
+}
+
+.metric strong { display: block; font-size: 17px; }
+
+.actions {
+  display: grid;
+  gap: 7px;
+}
+
+.actions.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+  min-height: 36px;
+}
+
+button:hover { background: #f2f5f9; }
+button:disabled { opacity: .45; cursor: default; }
+
+button.primary {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+  font-weight: 650;
+}
+
+button.danger { color: #b42318; }
+
+.status {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #475569;
+}
+
+.error {
+  border-color: #f1aeb5;
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.warning {
+  border-color: #f5d78e;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.success {
+  border-color: #a7d7b8;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+textarea {
+  width: 100%;
+  min-height: 130px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+  color: inherit;
+}
+
+.preview {
+  display: grid;
+  gap: 6px;
+}
+
+.preview-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
+  font-size: 12px;
+}
+
+.preview-id { font-weight: 750; }
+.preview-values { min-width: 0; }
+.preview-values div { overflow-wrap: anywhere; }
+.preview-message { color: #64748b; margin-top: 3px; }
+
+.badge {
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.badge-ok { background: #dcfce7; color: #166534; }
+.badge-review { background: #fef3c7; color: #92400e; }
+.badge-error { background: #fee2e2; color: #991b1b; }
+.badge-same, .badge-skip { background: #e5e7eb; color: #374151; }
+
+details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #475569;
+}
+
+.small { font-size: 11px; color: #64748b; }
+
+@media (min-width: 440px) {
+  .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .actions.main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root, body { background: #17191c; color: #f3f4f6; }
+  .card, button, textarea { background: #22252a; color: #f3f4f6; border-color: #3b4048; }
+  button:hover { background: #2a2e34; }
+  .status, .small, .version, details summary { color: #b6beca; }
+  .preview-item { border-color: #3b4048; }
+  .error { background: #3a1e23; color: #fecdd3; }
+  .warning { background: #392e18; color: #fde68a; }
+  .success { background: #16321f; color: #bbf7d0; }
+}
