@@ -92,6 +92,27 @@ describe("multi-page form sessions", () => {
     expect(() => normalizeSessionFillRequest(wrongPage, session, page1)).toThrow("SESSION_PAGE_MISMATCH");
   });
 
+  it("round-trips iframe field identity through the session namespace", () => {
+    const page1 = manifest("page-one");
+    page1.fields.push({
+      ...page1.fields[0]!,
+      id: "I1-F02",
+      label: "Поле iframe",
+      fingerprint: { ...page1.fields[0]!.fingerprint, label: "Поле iframe", domPath: "iframe[1]>input" },
+    });
+    const session = acceptManifestInSession(createFormSession(1_000, "s"), page1, 2_000);
+    const parsed = parseFillRequest(
+      JSON.stringify({ version: 1, pageFingerprint: "page-one", fields: { "P1-I1-F02": "Значение" } }),
+    );
+
+    expect(qualifySessionFieldId(1, "I1-F02")).toBe("P1-I1-F02");
+    expect(normalizeSessionFillRequest(parsed, session, page1)).toEqual({
+      version: 1,
+      pageFingerprint: "page-one",
+      fields: { "I1-F02": "Значение" },
+    });
+  });
+
   it("rejects unqualified Fxx while a session is active", () => {
     const page1 = manifest("page-one");
     const session = acceptManifestInSession(createFormSession(1_000, "s"), page1, 2_000);
@@ -108,7 +129,7 @@ describe("multi-page form sessions", () => {
     expect(JSON.stringify(session)).not.toContain("Иван");
   });
 
-  it("generates Pn-Fxx GPT manifest and expires idle sessions", () => {
+  it("generates Pn field manifest and expires idle sessions", () => {
     const page1 = manifest("page-one");
     const session = acceptManifestInSession(createFormSession(1_000, "session-visible"), page1, 2_000);
     const packet = makeGptPacket(page1, { sessionId: session.id, pageNumber: 1 });
