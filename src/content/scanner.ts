@@ -1,6 +1,7 @@
 import type { FieldDescriptor, FieldFingerprint, FieldType, FormManifest } from "../shared/types";
 import { fnv1a, pageFingerprint } from "../shared/fingerprint";
 import { getElementLabel, isSensitiveField } from "./labels";
+import { framePathFor, isInput, isSelect, isTextArea } from "./dom";
 
 export interface FieldHandle {
   id: string;
@@ -47,7 +48,7 @@ function formIndex(element: HTMLElement): number {
   return Array.from(element.ownerDocument.forms).indexOf(form as HTMLFormElement);
 }
 
-function domPath(element: Element): string {
+function localDomPath(element: Element): string {
   const parts: string[] = [];
   let current: Element | null = element;
   for (let depth = 0; current && depth < 6; depth += 1) {
@@ -62,11 +63,17 @@ function domPath(element: Element): string {
   return parts.join(">");
 }
 
+function domPath(element: Element): string {
+  const framePath = framePathFor(element);
+  const localPath = localDomPath(element);
+  return framePath ? `${framePath}::${localPath}` : localPath;
+}
+
 function inferType(element: HTMLElement, sensitive: boolean): FieldType {
   if (sensitive) return "protected";
-  if (element instanceof HTMLTextAreaElement) return "textarea";
-  if (element instanceof HTMLSelectElement) return "select";
-  if (element instanceof HTMLInputElement) {
+  if (isTextArea(element)) return "textarea";
+  if (isSelect(element)) return "select";
+  if (isInput(element)) {
     switch (element.type) {
       case "checkbox":
         return "checkbox";
@@ -96,34 +103,22 @@ function inferType(element: HTMLElement, sensitive: boolean): FieldType {
 }
 
 function readonly(element: HTMLElement): boolean {
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.readOnly;
+  if (isInput(element) || isTextArea(element)) return element.readOnly;
   return element.getAttribute("aria-readonly") === "true";
 }
 
 function disabled(element: HTMLElement): boolean {
-  if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement ||
-    element instanceof HTMLSelectElement
-  ) {
-    return element.disabled;
-  }
+  if (isInput(element) || isTextArea(element) || isSelect(element)) return element.disabled;
   return element.getAttribute("aria-disabled") === "true";
 }
 
 function required(element: HTMLElement): boolean {
-  if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement ||
-    element instanceof HTMLSelectElement
-  ) {
-    return element.required;
-  }
+  if (isInput(element) || isTextArea(element) || isSelect(element)) return element.required;
   return element.getAttribute("aria-required") === "true";
 }
 
 function optionsOf(element: HTMLElement): string[] | undefined {
-  if (element instanceof HTMLSelectElement) {
+  if (isSelect(element)) {
     return Array.from(element.options)
       .filter((option) => !option.disabled)
       .map((option) => option.text.trim())
@@ -135,7 +130,7 @@ function optionsOf(element: HTMLElement): string[] | undefined {
 function fingerprintOf(element: HTMLElement, label: string, type: FieldType): FieldFingerprint {
   return {
     tag: element.tagName.toLowerCase(),
-    inputType: element instanceof HTMLInputElement ? element.type : type,
+    inputType: isInput(element) ? element.type : type,
     name: element.getAttribute("name") || undefined,
     domId: element.id || undefined,
     label,
@@ -180,7 +175,9 @@ function collectCandidates(root: Document | ShadowRoot, output: HTMLElement[], f
 
   for (const frame of Array.from(root.querySelectorAll<HTMLIFrameElement>("iframe"))) {
     try {
-      if (frame.contentDocument) collectCandidates(frame.contentDocument, output, frameCounter);
+      const childDocument = frame.contentDocument;
+      if (childDocument) collectCandidates(childDocument, output, frameCounter);
+      else frameCounter.unsupported += 1;
     } catch {
       frameCounter.unsupported += 1;
     }
@@ -191,7 +188,7 @@ function radioGroup(candidates: HTMLElement[], element: HTMLInputElement): HTMLI
   if (!element.name) return [element];
   return candidates.filter(
     (candidate): candidate is HTMLInputElement =>
-      candidate instanceof HTMLInputElement &&
+      isInput(candidate) &&
       candidate.type === "radio" &&
       candidate.name === element.name &&
       candidate.form === element.form &&
@@ -221,7 +218,7 @@ export function scanDocument(mutationRevision: number): ScanState {
     let elements = [element];
     let options = optionsOf(element);
 
-    if (element instanceof HTMLInputElement && element.type === "radio") {
+    if (isInput(element) && element.type === "radio") {
       elements = radioGroup(candidates, element);
       for (const radio of elements) handled.add(radio);
       options = elements.map((radio) => getElementLabel(radio)).filter(Boolean);
