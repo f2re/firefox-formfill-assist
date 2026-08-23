@@ -44,6 +44,16 @@ function requireCrypto(): Crypto {
   return globalThis.crypto;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function utf8(value: string): ArrayBuffer {
+  return toArrayBuffer(new TextEncoder().encode(value));
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 0x8000;
@@ -127,7 +137,7 @@ function validateProfileVault(value: unknown): ProfileVault {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await requireCrypto().subtle.digest("SHA-256", bytes);
+  const digest = await requireCrypto().subtle.digest("SHA-256", toArrayBuffer(bytes));
   return bytesToHex(new Uint8Array(digest));
 }
 
@@ -140,13 +150,13 @@ async function deriveProfileKey(secret: string, salt: Uint8Array, iterations: nu
   const cryptoObject = requireCrypto();
   const baseKey = await cryptoObject.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    utf8(secret),
     "PBKDF2",
     false,
     ["deriveKey"],
   );
   return cryptoObject.subtle.deriveKey(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    { name: "PBKDF2", hash: "SHA-256", salt: toArrayBuffer(salt), iterations },
     baseKey,
     { name: "AES-GCM", length: 256 },
     false,
@@ -162,7 +172,7 @@ export function createDataProfile(
   name: string,
   fields: ProfileField[] = [],
   now = Date.now(),
-  id = globalThis.crypto?.randomUUID?.() ?? `profile-${now.toString(36)}`,
+  id: string = globalThis.crypto?.randomUUID?.() ?? `profile-${now.toString(36)}`,
 ): DataProfile {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error("Название профиля не может быть пустым.");
@@ -195,9 +205,14 @@ export async function encryptProfileVault(
   const key = await deriveProfileKey(secret, salt, PROFILE_PBKDF2_ITERATIONS);
   const plaintext = new TextEncoder().encode(stableProfileVault(vault));
   const ciphertextBuffer = await cryptoObject.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(PROFILE_AAD), tagLength: 128 },
+    {
+      name: "AES-GCM",
+      iv: toArrayBuffer(iv),
+      additionalData: utf8(PROFILE_AAD),
+      tagLength: 128,
+    },
     key,
-    plaintext,
+    toArrayBuffer(plaintext),
   );
   const ciphertext = new Uint8Array(ciphertextBuffer);
 
@@ -242,9 +257,14 @@ export async function decryptProfileVault(bundle: EncryptedProfileBundle, secret
   const key = await deriveProfileKey(secret, salt, bundle.kdf.iterations);
   try {
     const plaintext = await requireCrypto().subtle.decrypt(
-      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(PROFILE_AAD), tagLength: 128 },
+      {
+        name: "AES-GCM",
+        iv: toArrayBuffer(iv),
+        additionalData: utf8(PROFILE_AAD),
+        tagLength: 128,
+      },
       key,
-      ciphertext,
+      toArrayBuffer(ciphertext),
     );
     return validateProfileVault(JSON.parse(new TextDecoder().decode(plaintext)) as unknown);
   } catch (error) {
