@@ -4,20 +4,20 @@ import type { FieldDescriptor, FormManifest } from "../src/shared/types";
 
 function field(overrides: Partial<FieldDescriptor> & Pick<FieldDescriptor, "id" | "type" | "label">): FieldDescriptor {
   return {
+    ...overrides,
     id: overrides.id,
     type: overrides.type,
     label: overrides.label,
-    required: false,
-    disabled: false,
-    readonly: false,
-    sensitive: false,
-    fingerprint: {
+    required: overrides.required ?? false,
+    disabled: overrides.disabled ?? false,
+    readonly: overrides.readonly ?? false,
+    sensitive: overrides.sensitive ?? false,
+    fingerprint: overrides.fingerprint ?? {
       tag: "input",
       label: overrides.label,
       formIndex: 0,
       domPath: overrides.id,
     },
-    ...overrides,
   };
 }
 
