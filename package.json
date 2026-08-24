@@ -1,11 +1,13 @@
 {
   "name": "firefox-formfill-assist",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "Safety-first Firefox extension for screenshot-to-AI form filling with strict JSON, preview and no auto-submit.",
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build:bundle": "node scripts/build.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs",
+    "build": "npm run build:bundle && npm run verify:dist",
     "package": "node scripts/package.mjs",
     "verify:version": "node scripts/check-version.mjs",
     "typecheck": "tsc --noEmit",
