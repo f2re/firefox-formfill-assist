@@ -2,6 +2,23 @@
 
 All notable user-facing changes to FormFill Assistant are documented here.
 
+## 0.4.2
+
+### Critical sidebar reliability
+
+- fixed the blank Firefox sidebar caused by Vite emitting extension-root `/assets/*` URLs instead of paths relative to `sidebar/index.html`;
+- production build now fails when any sidebar script, stylesheet, icon or other referenced asset is missing, empty or root-absolute;
+- added a real Firefox/Playwright startup smoke test that serves the production `dist/` package, loads `sidebar/index.html`, checks for page errors/404 responses and exercises screenshot preparation;
+- added a visible bootstrap fallback so a future JavaScript startup failure produces an actionable message instead of an empty panel.
+
+### Guided UX
+
+- replaced the detached floating screenshot tool with a persistent five-step workflow: page → screenshot → AI response → preview → fill;
+- one primary action now scans the page, applies privacy masks, captures the screenshot and prepares the dynamic prompt;
+- the AI response can be pasted directly into the guided card or read from the clipboard;
+- the simple interface hides sessions, history and manual utilities by default while retaining them behind “Advanced tools”;
+- the workflow automatically collapses and scrolls to the mandatory preview after the AI response is submitted for validation.
+
 ## 0.4.1
 
 ### Branding / AMO

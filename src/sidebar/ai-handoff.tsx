@@ -1,5 +1,5 @@
 import { render } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { FormManifest, RpcResponse } from "../shared/types";
 import { aiCaptureFilename, planAiHandoff } from "../shared/ai-handoff";
 import { makePortableAiPromptTemplate } from "../shared/gpt";
@@ -26,60 +26,14 @@ interface ActiveTab extends browser.tabs.Tab {
   windowId: number;
 }
 
-const PANEL_CSS = `
-#ai-handoff-root { position: relative; z-index: 50; }
-.ai-handoff-fab {
-  position: fixed; right: 14px; bottom: 14px; z-index: 1000;
-  min-height: 42px; padding: 9px 14px 9px 12px; border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.24);
-  background: linear-gradient(135deg,#0f6cf2 0%,#16bfd2 56%,#6748ed 100%);
-  color:#fff; font-weight:760; letter-spacing:-.01em;
-  box-shadow:0 12px 28px rgba(25,94,194,.30), inset 0 1px 0 rgba(255,255,255,.22);
-}
-.ai-handoff-fab::before {
-  content:"✦"; display:inline-grid; place-items:center; width:22px; height:22px;
-  margin-right:7px; border-radius:7px; background:rgba(255,255,255,.18); font-size:13px;
-}
-.ai-handoff-fab:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 15px 32px rgba(25,94,194,.36); }
-.ai-handoff-panel {
-  position:fixed; left:10px; right:10px; bottom:66px; z-index:999;
-  max-height:min(76vh,680px); overflow:auto;
-  background:rgba(255,255,255,.97); border:1px solid #d7e3f2; border-radius:18px;
-  padding:12px; box-shadow:0 22px 54px rgba(16,42,86,.24); backdrop-filter:blur(18px);
-}
-.ai-handoff-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
-.ai-handoff-brand { display:flex; align-items:center; gap:9px; min-width:0; }
-.ai-handoff-logo { width:38px; height:38px; flex:0 0 auto; filter:drop-shadow(0 4px 8px rgba(26,86,170,.16)); }
-.ai-handoff-title { font-size:13px; font-weight:790; color:#192a4b; }
-.ai-handoff-head button { width:auto; min-height:30px; padding:4px 9px; border-radius:9px; }
-.ai-handoff-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:10px; }
-.ai-handoff-step { padding:7px; border:1px solid #e1eaf5; border-radius:10px; background:#f7faff; font-size:9.5px; line-height:1.3; color:#61718a; }
-.ai-handoff-step strong { display:block; margin-bottom:2px; color:#245bad; font-size:10px; }
-.ai-handoff-preview { display:block; width:100%; max-height:250px; object-fit:contain; margin-top:10px; border:1px solid #d7e3f2; border-radius:12px; background:#edf3fa; box-shadow:inset 0 0 0 1px rgba(255,255,255,.55); }
-.ai-handoff-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:9px; }
-.ai-handoff-actions .wide { grid-column:1 / -1; }
-.ai-handoff-template { width:100%; margin-top:7px; min-height:34px; padding:7px 9px; border-style:dashed; background:rgba(244,248,254,.7); font-size:10.5px; color:#536985; }
-.ai-handoff-note { margin:8px 0 0; font-size:10.5px; line-height:1.48; color:#687891; }
-.ai-handoff-error { margin-top:9px; padding:8px 9px; border:1px solid #efbdc6; border-radius:10px; background:#fff2f5; color:#aa2d47; font-size:10.5px; }
-.ai-handoff-ok { margin-top:9px; padding:8px 9px; border:1px solid #bce2d0; border-radius:10px; background:#f0fbf6; color:#18704e; font-size:10.5px; }
-@media (max-width:319px){ .ai-handoff-steps{grid-template-columns:1fr;} .ai-handoff-actions{grid-template-columns:1fr;} .ai-handoff-actions .wide{grid-column:auto;} }
-@media (prefers-color-scheme: dark) {
-  .ai-handoff-panel { background:rgba(20,28,41,.98); border-color:#33445b; color:#edf5ff; }
-  .ai-handoff-title { color:#edf5ff; }
-  .ai-handoff-step { background:#182337; border-color:#2d3d54; color:#aab7ca; }
-  .ai-handoff-step strong { color:#8ebcff; }
-  .ai-handoff-preview { background:#101827; border-color:#33445b; }
-  .ai-handoff-template { background:#172134; border-color:#3a4a62; color:#b1bfd1; }
-  .ai-handoff-note { color:#a7b4c8; }
-  .ai-handoff-error { background:#351f2a; border-color:#623748; color:#ffc4d0; }
-  .ai-handoff-ok { background:#153026; border-color:#2b5a47; color:#b9efd5; }
-}
-`;
+type AppStage = 0 | 4 | 5;
+
+const ADVANCED_UI_STORAGE_KEY = "formfillAdvancedUi";
 
 async function callScan(): Promise<FormManifest> {
   const response = (await browser.runtime.sendMessage({ scope: "tab", action: "scan" })) as RpcResponse<FormManifest>;
   if (!response?.ok || !response.data) {
-    throw new Error(response?.error || "Не удалось проанализировать форму перед снимком.");
+    throw new Error(response?.error || "Не удалось проанализировать форму.");
   }
   return response.data;
 }
@@ -130,12 +84,31 @@ function downloadPng(dataUrl: string, filename: string): void {
   anchor.remove();
 }
 
+function scrollToMain(): void {
+  window.setTimeout(() => {
+    document.getElementById("app")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 120);
+}
+
 function AiHandoff() {
-  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [handoff, setHandoff] = useState<CapturedHandoff | null>(null);
+  const [jsonText, setJsonText] = useState("");
+  const [responseStarted, setResponseStarted] = useState(false);
+  const [appStage, setAppStage] = useState<AppStage>(0);
+  const jsonRef = useRef<HTMLTextAreaElement>(null);
+
+  const stage = useMemo(() => {
+    if (appStage === 5) return 5;
+    if (appStage === 4) return 4;
+    if (responseStarted || jsonText.trim()) return 3;
+    if (handoff) return 2;
+    return 1;
+  }, [appStage, handoff, jsonText, responseStarted]);
 
   const run = async (work: () => Promise<void>): Promise<void> => {
     setBusy(true);
@@ -143,14 +116,54 @@ function AiHandoff() {
     try {
       await work();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Неизвестная ошибка подготовки снимка.");
+      setError(cause instanceof Error ? cause.message : "Неизвестная ошибка.");
     } finally {
       setBusy(false);
     }
   };
 
+  useEffect(() => {
+    document.body.classList.toggle("formfill-simple", !advanced);
+    void browser.storage.local.set({ [ADVANCED_UI_STORAGE_KEY]: advanced });
+  }, [advanced]);
+
+  useEffect(() => {
+    void browser.storage.local.get(ADVANCED_UI_STORAGE_KEY).then((stored) => {
+      if (stored[ADVANCED_UI_STORAGE_KEY] === true) setAdvanced(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    const app = document.getElementById("app");
+    if (!app) return;
+
+    const inspect = () => {
+      if (app.querySelector(".success")) {
+        setAppStage(5);
+        return;
+      }
+      if (app.querySelector('[aria-label="Фильтр preview"]')) {
+        setAppStage(4);
+        return;
+      }
+      setAppStage(0);
+    };
+
+    inspect();
+    const observer = new MutationObserver(inspect);
+    observer.observe(app, { childList: true, subtree: true, attributes: true });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const openHandler = () => setExpanded(true);
+    window.addEventListener("formfill:open-ai-handoff", openHandler);
+    return () => window.removeEventListener("formfill:open-ai-handoff", openHandler);
+  }, []);
+
   const capture = () =>
     void run(async () => {
+      setStatus("Анализируем форму и готовим безопасный снимок…");
       const tab = await activeTab();
       const manifest = await callScan();
       const session = await loadSession();
@@ -161,19 +174,21 @@ function AiHandoff() {
       try {
         await togglePrivacyMasks(tab.id);
         masksEnabled = true;
-        await delay(110);
+        await delay(120);
         dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
       } finally {
         if (masksEnabled) {
           try {
             await togglePrivacyMasks(tab.id);
           } catch {
-            // The injected mask script also removes itself automatically after 15 seconds.
+            // capture-mask.js also removes itself after 15 seconds.
           }
         }
       }
 
-      if (!dataUrl.startsWith("data:image/png")) throw new Error("Firefox не вернул PNG снимок активной вкладки.");
+      if (!dataUrl.startsWith("data:image/png")) {
+        throw new Error("Firefox не вернул PNG активной страницы.");
+      }
 
       const capturedAt = new Date().toISOString();
       let screenshotCopied = false;
@@ -181,10 +196,10 @@ function AiHandoff() {
         await copyPng(dataUrl);
         screenshotCopied = true;
       } catch {
-        // Download remains available as a deterministic fallback.
+        // The explicit copy and download buttons remain available.
       }
 
-      const next: CapturedHandoff = {
+      setHandoff({
         dataUrl,
         prompt: plan.prompt,
         filename: aiCaptureFilename(capturedAt, plan.pageNumber),
@@ -194,12 +209,15 @@ function AiHandoff() {
         pageFingerprint: plan.pageFingerprint,
         unsupportedCrossOriginFrames: manifest.unsupportedCrossOriginFrames,
         screenshotCopied,
-      };
-      setHandoff(next);
+      });
+      setJsonText("");
+      setResponseStarted(false);
+      setAppStage(0);
+      setExpanded(true);
       setStatus(
         screenshotCopied
-          ? "Готово: PNG уже в буфере. Вставьте его в vision-ИИ и затем скопируйте динамический промпт."
-          : "Снимок готов. Если Firefox не дал положить PNG в буфер, используйте «Скачать PNG».",
+          ? "Снимок готов и уже скопирован. Вставьте его в vision-ИИ, затем скопируйте промпт."
+          : "Снимок готов. Firefox не разрешил автоматическое копирование — нажмите «Скопировать снимок» или «Скачать PNG».",
       );
 
       await browser.storage.local.set({
@@ -212,91 +230,173 @@ function AiHandoff() {
       if (!handoff) throw new Error("Сначала подготовьте снимок.");
       await copyPng(handoff.dataUrl);
       setHandoff({ ...handoff, screenshotCopied: true });
-      setStatus("PNG скопирован. Вставьте изображение в vision-ИИ.");
+      setStatus("Снимок скопирован. Вставьте его в диалог vision-ИИ.");
     });
 
   const copyPrompt = () =>
     void run(async () => {
-      if (!handoff) throw new Error("Сначала подготовьте снимок — промпт должен соответствовать этому fingerprint.");
+      if (!handoff) throw new Error("Сначала подготовьте снимок и manifest формы.");
       await navigator.clipboard.writeText(handoff.prompt);
-      setStatus("Динамический промпт скопирован. Вставьте его в тот же диалог ИИ после изображения.");
+      setStatus("Промпт скопирован. Вставьте его в тот же диалог ИИ после снимка.");
+      window.setTimeout(() => jsonRef.current?.focus(), 100);
+    });
+
+  const sendJsonForPreview = () =>
+    void run(async () => {
+      const entered = jsonText.trim();
+      if (entered) {
+        await navigator.clipboard.writeText(entered);
+      } else {
+        const clipboardText = await navigator.clipboard.readText();
+        if (!clipboardText.trim()) {
+          throw new Error("Вставьте JSON от ИИ в поле или скопируйте его в буфер обмена.");
+        }
+      }
+
+      setResponseStarted(true);
+      setStatus("Ответ ИИ передан на строгую проверку. Ниже появится preview; ничего ещё не заполнено.");
+      await browser.storage.local.set({
+        pendingCommand: { command: "paste-json", createdAt: Date.now() },
+      });
+      setExpanded(false);
+      scrollToMain();
     });
 
   const copyPortableTemplate = () =>
     void run(async () => {
       await navigator.clipboard.writeText(makePortableAiPromptTemplate());
-      setStatus(
-        "Универсальный шаблон скопирован. Для реального заполнения нужен актуальный [FORM_MANIFEST]; для текущей формы используйте динамический промпт.",
-      );
+      setStatus("Универсальный шаблон скопирован. Для текущей формы надёжнее использовать динамический промпт выше.");
     });
 
-  return (
-    <div id="ai-handoff-root">
-      <style>{PANEL_CSS}</style>
-      <button class="ai-handoff-fab" disabled={busy} onClick={() => setOpen(!open)}>
-        {busy ? "Подготовка…" : "Снимок + промпт"}
+  const resetFlow = () => {
+    setHandoff(null);
+    setJsonText("");
+    setResponseStarted(false);
+    setAppStage(0);
+    setError("");
+    setStatus("");
+    setExpanded(true);
+  };
+
+  if (!expanded) {
+    return (
+      <button class="ai-flow-collapsed" type="button" onClick={() => setExpanded(true)}>
+        <span>{stage >= 4 ? "Preview готов — проверьте поля ниже" : "Заполнить форму с помощью ИИ"}</span>
+        <span aria-hidden="true">⌃</span>
       </button>
+    );
+  }
 
-      {open && (
-        <section class="ai-handoff-panel" aria-label="Подготовка формы для ИИ">
-          <div class="ai-handoff-head">
-            <div class="ai-handoff-brand">
-              <img class="ai-handoff-logo" src="../icons/formfill.svg" alt="" />
-              <div>
-                <div class="ai-handoff-title">Подготовить форму для vision-ИИ</div>
-                <div class="small">Приватный screenshot + строгий JSON-контракт</div>
-              </div>
-            </div>
-            <button disabled={busy} onClick={() => setOpen(false)} aria-label="Закрыть">×</button>
+  return (
+    <section class="ai-flow-card" aria-label="Пошаговое заполнение формы с помощью ИИ">
+      <div class="ai-flow-head">
+        <div class="ai-flow-brand">
+          <img class="ai-flow-logo" src="../icons/formfill.svg" alt="" />
+          <div>
+            <div class="ai-flow-title">Заполнить форму с помощью ИИ</div>
+            <div class="ai-flow-subtitle">Один понятный сценарий: страница → снимок и промпт → JSON → preview → заполнение</div>
           </div>
-
-          <div class="ai-handoff-steps" aria-label="Порядок работы">
-            <div class="ai-handoff-step"><strong>1 · Подготовить</strong>Сканируем форму, показываем Fxx и маскируем текущие значения.</div>
-            <div class="ai-handoff-step"><strong>2 · Передать ИИ</strong>Вставьте PNG и динамический промпт в один диалог vision-ИИ.</div>
-            <div class="ai-handoff-step"><strong>3 · Вернуть JSON</strong>Скопируйте ответ ИИ и нажмите «Вставить ответ» в sidebar.</div>
-          </div>
-
-          <p class="ai-handoff-note">
-            Расширение ничего не отправляет наружу само. Текущие значения видимых editable-полей закрываются локальными privacy-масками перед снимком.
-          </p>
-
-          <button class="primary" style="width:100%; margin-top:9px" disabled={busy} onClick={capture}>
-            {handoff ? "Переснять и обновить ИИ-пакет" : "Подготовить снимок и промпт"}
-          </button>
-          <button class="ai-handoff-template" disabled={busy} onClick={copyPortableTemplate}>
-            Универсальный шаблон для внешней интеграции
-          </button>
-
-          {error && <div class="ai-handoff-error" role="alert">{error}</div>}
-          {status && <div class="ai-handoff-ok">{status}</div>}
-
+        </div>
+        <div class="ai-flow-head-actions">
           {handoff && (
-            <>
-              <img class="ai-handoff-preview" src={handoff.dataUrl} alt="Снимок формы с метками полей" />
-              <p class="ai-handoff-note">
-                {handoff.fieldCount} полей · {handoff.fieldNamespace} · fingerprint {handoff.pageFingerprint.slice(0, 12)}…
-              </p>
-              {handoff.unsupportedCrossOriginFrames > 0 && (
-                <div class="ai-handoff-error">
-                  На странице есть cross-origin iframe: {handoff.unsupportedCrossOriginFrames}. Их содержимое нельзя надёжно замаскировать; проверьте PNG перед передачей ИИ.
-                </div>
-              )}
-              <div class="ai-handoff-actions">
-                <button disabled={busy} onClick={copyScreenshot}>Скопировать PNG</button>
-                <button class="primary" disabled={busy} onClick={copyPrompt}>Скопировать промпт</button>
-                <button class="wide" disabled={busy} onClick={() => downloadPng(handoff.dataUrl, handoff.filename)}>
-                  Скачать PNG
-                </button>
-              </div>
-              <p class="ai-handoff-note">
-                После ответа ИИ вернитесь в sidebar: «Вставить ответ» → обязательный preview → «Заполнить». Submit/Next всегда остаются ручными.
-              </p>
-            </>
+            <button class="ai-flow-icon-button" type="button" onClick={resetFlow} title="Начать заново" aria-label="Начать заново">↻</button>
           )}
-        </section>
-      )}
-    </div>
+          <button class="ai-flow-icon-button" type="button" onClick={() => setExpanded(false)} title="Свернуть" aria-label="Свернуть">⌄</button>
+        </div>
+      </div>
+
+      <div class="ai-flow-steps" aria-label={`Текущий шаг: ${stage} из 5`}>
+        {["Страница", "Снимок", "Ответ ИИ", "Проверка", "Заполнение"].map((label, index) => {
+          const number = index + 1;
+          const state = number < stage ? "done" : number === stage ? "active" : "";
+          return (
+            <div class={`ai-flow-step ${state}`} key={label} aria-current={number === stage ? "step" : undefined}>
+              <span class="ai-flow-step-number">{number < stage ? "✓" : number}</span>
+              {label}
+            </div>
+          );
+        })}
+      </div>
+
+      <div class="ai-flow-body">
+        {!handoff ? (
+          <>
+            <p class="ai-flow-lead">
+              Откройте нужную страницу и нажмите одну кнопку. Расширение само найдёт поля, покажет метки Fxx, временно закроет уже введённые значения и подготовит пакет для vision-ИИ.
+            </p>
+            <div class="ai-flow-safety">
+              <span>Ничего не отправляется автоматически</span>
+              <span>Пароли и чувствительные поля блокируются</span>
+              <span>Submit никогда не нажимается</span>
+            </div>
+            <button class="ai-flow-primary" type="button" disabled={busy} onClick={capture}>
+              {busy ? "Подготавливаем страницу…" : "1. Подготовить снимок и промпт"}
+            </button>
+          </>
+        ) : (
+          <>
+            <img class="ai-flow-preview" src={handoff.dataUrl} alt="Снимок формы с метками Fxx" />
+            <div class="ai-flow-meta">
+              {handoff.fieldCount} полей · {handoff.fieldNamespace} · fingerprint {handoff.pageFingerprint.slice(0, 12)}…
+            </div>
+
+            {handoff.unsupportedCrossOriginFrames > 0 && (
+              <div class="ai-flow-warning">
+                На странице есть cross-origin iframe: {handoff.unsupportedCrossOriginFrames}. Их содержимое браузер не даёт надёжно замаскировать — проверьте снимок перед передачей ИИ.
+              </div>
+            )}
+
+            <div class="ai-flow-actions">
+              <button class="ai-flow-secondary" type="button" disabled={busy} onClick={copyScreenshot}>
+                {handoff.screenshotCopied ? "✓ Снимок скопирован" : "2. Скопировать снимок"}
+              </button>
+              <button class="ai-flow-primary" type="button" disabled={busy} onClick={copyPrompt}>
+                3. Скопировать промпт
+              </button>
+              <button class="ai-flow-secondary wide" type="button" disabled={busy} onClick={() => downloadPng(handoff.dataUrl, handoff.filename)}>
+                Скачать PNG, если вставка изображения недоступна
+              </button>
+            </div>
+
+            <div class="ai-flow-note">
+              Вставьте снимок и промпт в один диалог ChatGPT, Claude, Gemini или другого vision-ИИ. Передайте ИИ исходные данные для формы. В ответе должен быть только JSON.
+            </div>
+
+            <label class="ai-flow-json-label" for="ai-response-json">Ответ ИИ</label>
+            <textarea
+              ref={jsonRef}
+              id="ai-response-json"
+              class="ai-flow-json"
+              value={jsonText}
+              onInput={(event) => setJsonText((event.currentTarget as HTMLTextAreaElement).value)}
+              placeholder="Вставьте сюда JSON от ИИ или оставьте поле пустым, если JSON уже скопирован в буфер"
+              spellcheck={false}
+            />
+            <button class="ai-flow-primary" type="button" disabled={busy} onClick={sendJsonForPreview}>
+              {busy ? "Проверяем ответ…" : "4. Проверить ответ ИИ"}
+            </button>
+          </>
+        )}
+
+        {error && <div class="ai-flow-error" role="alert">{error}</div>}
+        {status && <div class="ai-flow-status" aria-live="polite">{status}</div>}
+
+        <div class="ai-flow-footer">
+          <button class="ai-flow-toggle" type="button" onClick={() => setAdvanced(!advanced)}>
+            {advanced ? "Скрыть расширенные инструменты" : "Показать расширенные инструменты"}
+          </button>
+          <div class="ai-flow-privacy">Локальная обработка · без telemetry · без auto-submit</div>
+        </div>
+
+        {advanced && (
+          <button class="ai-flow-toggle" type="button" disabled={busy} onClick={copyPortableTemplate}>
+            Скопировать универсальный шаблон промпта для внешней интеграции
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
+document.getElementById("boot-fallback")?.remove();
 render(<AiHandoff />, document.getElementById("ai-handoff")!);
