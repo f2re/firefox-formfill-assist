@@ -1,7 +1,16 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { build } from "vite";
 
+const execFileAsync = promisify(execFile);
+
 export default async function globalSetup(): Promise<void> {
+  await execFileAsync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"], {
+    cwd: process.cwd(),
+    env: process.env,
+  });
+
   await build({
     configFile: false,
     logLevel: "warn",
