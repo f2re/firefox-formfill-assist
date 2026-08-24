@@ -11,6 +11,10 @@ await mkdir(dist, { recursive: true });
 await build({
   configFile: false,
   root: resolve(root, "src/sidebar"),
+  // WebExtension pages are not hosted at the extension root. Absolute `/assets/*`
+  // URLs resolve to moz-extension://<id>/assets/* and leave the sidebar blank.
+  // A relative base keeps every emitted script/style next to sidebar/index.html.
+  base: "./",
   esbuild: { jsx: "automatic", jsxImportSource: "preact" },
   build: {
     outDir: resolve(dist, "sidebar"),
