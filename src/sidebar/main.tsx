@@ -1,44 +1,64 @@
 import { render } from "preact";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type {
   FillRequest,
   FillResult,
   FormManifest,
-  HistoryEntry,
   PreviewItem,
   PreviewResult,
   RpcResponse,
   UndoResult,
 } from "../shared/types";
-import { parseFillRequest } from "../shared/schema";
-import { makeGptPacket } from "../shared/gpt";
-import { stringifyGptFeedbackReport } from "../shared/report";
 import {
-  FORM_SESSION_STORAGE_KEY,
-  acceptManifestInSession,
-  createFormSession,
-  currentSessionPage,
-  isFormSessionExpired,
-  normalizeSessionFillRequest,
-  qualifySessionFieldId,
-  recordSessionFillResult,
-  relationToSession,
-  sessionMatchesManifest,
-  type FormSession,
-} from "../shared/session";
+  parseAiFillResponse,
+  validateAiFillResponse,
+  type AiResponseDecision,
+} from "../shared/ai-response";
+import { makeBoundAiPrompt, makePortableAiPromptTemplate } from "../shared/gpt";
+import { aiCaptureFilename } from "../shared/ai-handoff";
 
 const STATUS_LABEL: Record<PreviewItem["status"], string> = {
-  ok: "✓ готово",
-  review: "⚠ проверить",
-  error: "✕ ошибка",
-  same: "= совпадает",
-  skip: "пропуск",
+  ok: "Готово",
+  review: "Проверить",
+  error: "Ошибка",
+  same: "Уже совпадает",
+  skip: "Пропуск",
 };
 
-const PREVIEW_LIMIT = 40;
+const ADVANCED_STORAGE_KEY = "formfillAdvancedUi";
+const MAX_PREVIEW_ITEMS = 60;
 
-type PreviewFilter = "all" | "attention";
 type TabAction = "ping" | "scan" | "toggleOverlay" | "highlightProblems" | "preview" | "fill" | "undo";
+type BusyAction = "scan" | "capture" | "copy-image" | "copy-prompt" | "review" | "fill" | "undo" | "diagnostics" | null;
+
+interface ActiveTab extends browser.tabs.Tab {
+  id: number;
+  windowId: number;
+}
+
+interface CapturePacket {
+  captureId: string;
+  tabId: number;
+  windowId: number;
+  title: string;
+  pageUrl: string;
+  capturedAt: string;
+  dataUrl: string;
+  filename: string;
+  manifest: FormManifest;
+  screenshotCopied: boolean;
+}
+
+interface PageSummary {
+  tabId: number;
+  title: string;
+  pageUrl: string;
+  manifest: FormManifest;
+}
+
+function messageFrom(error: unknown): string {
+  return error instanceof Error ? error.message : "Неизвестная ошибка расширения.";
+}
 
 async function callTab<T>(action: TabAction, payload?: unknown): Promise<T> {
   const response = (await browser.runtime.sendMessage({
@@ -47,587 +67,801 @@ async function callTab<T>(action: TabAction, payload?: unknown): Promise<T> {
     payload,
   })) as RpcResponse<T>;
 
-  if (!response?.ok) throw new Error(response?.error || "Расширение не получило ответ от страницы.");
+  if (!response?.ok) {
+    throw new Error(response?.error || "Расширение не получило ответ от страницы.");
+  }
   return response.data as T;
 }
 
-function shortValue(value: unknown): string {
+async function activeTab(): Promise<ActiveTab> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (!tab || typeof tab.id !== "number" || typeof tab.windowId !== "number") {
+    throw new Error("Firefox не сообщил активную вкладку. Переключитесь на страницу формы и повторите.");
+  }
+  return tab as ActiveTab;
+}
+
+async function scanActivePage(): Promise<PageSummary> {
+  const tab = await activeTab();
+  const manifest = await callTab<FormManifest>("scan");
+  return {
+    tabId: tab.id,
+    title: tab.title?.trim() || pageHost(manifest.page),
+    pageUrl: manifest.page,
+    manifest,
+  };
+}
+
+async function togglePrivacyMasks(tabId: number): Promise<void> {
+  await browser.scripting.executeScript({
+    target: { tabId },
+    files: ["capture-mask.js"],
+  });
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function copyPng(dataUrl: string): Promise<void> {
+  const response = await fetch(dataUrl);
+  if (!response.ok) throw new Error("Не удалось прочитать подготовленный PNG.");
+  const buffer = await response.arrayBuffer();
+  await browser.clipboard.setImageData(buffer, "png");
+}
+
+function downloadPng(dataUrl: string, filename: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = dataUrl;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function createCaptureId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const random = new Uint32Array(4);
+  crypto.getRandomValues(random);
+  return `capture-${Date.now().toString(36)}-${Array.from(random, (value) => value.toString(36)).join("")}`;
+}
+
+function pageHost(page: string): string {
+  try {
+    return new URL(page).host || page;
+  } catch {
+    return page;
+  }
+}
+
+function pagePath(page: string): string {
+  try {
+    const url = new URL(page);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return page;
+  }
+}
+
+function shortText(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   const text = typeof value === "string" ? value : JSON.stringify(value);
-  return text.length > 90 ? `${text.slice(0, 87)}…` : text;
+  return text.length > 110 ? `${text.slice(0, 107)}…` : text;
 }
 
-async function loadHistory(): Promise<HistoryEntry[]> {
-  const stored = await browser.storage.local.get("history");
-  return Array.isArray(stored.history) ? (stored.history as HistoryEntry[]).slice(0, 10) : [];
-}
-
-async function saveHistory(manifest: FormManifest, result: FillResult): Promise<HistoryEntry[]> {
-  const history = await loadHistory();
-  const entry: HistoryEntry = {
-    timestamp: result.completedAt,
-    page: new URL(manifest.page).origin,
-    fields: result.fields.length,
-    successful: result.filled + result.same,
-    review: result.review,
-    errors: result.errors,
-  };
-  const next = [entry, ...history].slice(0, 10);
-  await browser.storage.local.set({ history: next });
-  return next;
-}
-
-async function loadActiveSession(): Promise<FormSession | null> {
-  const stored = await browser.storage.local.get(FORM_SESSION_STORAGE_KEY);
-  const candidate = stored[FORM_SESSION_STORAGE_KEY] as FormSession | undefined;
-  if (!candidate || candidate.version !== 1 || typeof candidate.id !== "string" || !Array.isArray(candidate.pages)) {
-    return null;
-  }
-  if (isFormSessionExpired(candidate)) {
-    await browser.storage.local.remove(FORM_SESSION_STORAGE_KEY);
-    return null;
-  }
-  return candidate;
-}
-
-async function persistActiveSession(session: FormSession | null): Promise<void> {
-  if (session) {
-    await browser.storage.local.set({ [FORM_SESSION_STORAGE_KEY]: session });
-  } else {
-    await browser.storage.local.remove(FORM_SESSION_STORAGE_KEY);
-  }
-}
-
-function historyTime(timestamp: string): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return timestamp;
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   }).format(date);
 }
 
+function scrollTo(id: string): void {
+  window.setTimeout(() => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 80);
+}
+
+function stageNumber(packet: CapturePacket | null, responseText: string, preview: PreviewResult | null, result: FillResult | null): number {
+  if (result) return 5;
+  if (preview) return 4;
+  if (responseText.trim()) return 3;
+  if (packet) return 2;
+  return 1;
+}
+
 function App() {
-  const [manifest, setManifest] = useState<FormManifest | null>(null);
-  const [overlayVisible, setOverlayVisible] = useState(true);
-  const [jsonText, setJsonText] = useState("");
+  const version = browser.runtime.getManifest().version;
+  const [page, setPage] = useState<PageSummary | null>(null);
+  const [packet, setPacket] = useState<CapturePacket | null>(null);
+  const [sourceData, setSourceData] = useState("");
+  const [responseText, setResponseText] = useState("");
   const [request, setRequest] = useState<FillRequest | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [result, setResult] = useState<FillResult | null>(null);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [session, setSession] = useState<FormSession | null>(null);
-  const [sessionCandidate, setSessionCandidate] = useState<FormManifest | null>(null);
-  const [previewFilter, setPreviewFilter] = useState<PreviewFilter>("all");
-  const [previewExpanded, setPreviewExpanded] = useState(false);
-  const [status, setStatus] = useState("Страница ещё не проанализирована.");
+  const [aiDecision, setAiDecision] = useState<AiResponseDecision | null>(null);
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const [staleReason, setStaleReason] = useState("");
+  const [status, setStatus] = useState("Проверяем текущую страницу…");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<BusyAction>("scan");
+  const [advanced, setAdvanced] = useState(false);
+  const responseRef = useRef<HTMLTextAreaElement>(null);
 
-  const requiredCount = useMemo(
-    () => manifest?.fields.filter((field) => field.required).length ?? 0,
-    [manifest],
-  );
-  const selectCount = useMemo(
-    () => manifest?.fields.filter((field) => ["select", "combobox", "radio"].includes(field.type)).length ?? 0,
-    [manifest],
-  );
-  const protectedCount = useMemo(
-    () => manifest?.fields.filter((field) => field.sensitive).length ?? 0,
-    [manifest],
-  );
-  const sessionPage = useMemo(() => (session ? currentSessionPage(session) : null), [session]);
+  const prompt = useMemo(() => {
+    if (!packet) return "";
+    return makeBoundAiPrompt(packet.manifest, {
+      captureId: packet.captureId,
+      capturedAt: packet.capturedAt,
+      sourceData,
+    });
+  }, [packet, sourceData]);
 
-  const filteredPreviewItems = useMemo(() => {
-    if (!preview) return [];
-    if (previewFilter === "attention") {
-      return preview.items.filter((item) => item.status === "review" || item.status === "error");
-    }
-    return preview.items;
-  }, [preview, previewFilter]);
+  const stage = stageNumber(packet, responseText, preview, result);
+  const currentTabIsForm = Boolean(packet && activeTabId === packet.tabId);
+  const protectedCount = page?.manifest.fields.filter((field) => field.sensitive || field.type === "protected").length ?? 0;
+  const requiredCount = page?.manifest.fields.filter((field) => field.required).length ?? 0;
 
-  const visiblePreviewItems = useMemo(
-    () => previewExpanded ? filteredPreviewItems : filteredPreviewItems.slice(0, PREVIEW_LIMIT),
-    [filteredPreviewItems, previewExpanded],
-  );
-
-  const problemResults = useMemo(
-    () => result?.fields.filter((item) => item.status === "review" || item.status === "error") ?? [],
-    [result],
-  );
-
-  const displayFieldId = (fieldId: string): string =>
-    sessionPage && manifest && session && sessionMatchesManifest(session, manifest)
-      ? qualifySessionFieldId(sessionPage.pageNumber, fieldId)
-      : fieldId;
-
-  const run = async (work: () => Promise<void>) => {
-    setBusy(true);
+  const run = async (action: Exclude<BusyAction, null>, work: () => Promise<void>): Promise<void> => {
+    setBusy(action);
     setError("");
     try {
       await work();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Неизвестная ошибка.");
+      setError(messageFrom(cause));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const ensurePageNotChanged = async (): Promise<void> => {
-    const ping = await callTab<{ status?: string }>("ping");
-    if (ping?.status === "PAGE_CHANGED") {
-      throw new Error("Страница изменилась. Нажмите «Анализировать» перед продолжением.");
+  const refreshPage = async (quiet = false): Promise<PageSummary | null> => {
+    if (!quiet) {
+      setBusy("scan");
+      setError("");
+      setStatus("Проверяем текущую страницу…");
     }
-  };
-
-  const analyze = () =>
-    run(async () => {
-      const next = await callTab<FormManifest>("scan");
-      setManifest(next);
-      setPreview(null);
-      setRequest(null);
-      setResult(null);
-      setPreviewExpanded(false);
-      setPreviewFilter("all");
-
-      if (session) {
-        const relation = relationToSession(session, next);
-        if (relation.kind === "current") {
-          setSessionCandidate(null);
-          setStatus(`Сессия: страница ${relation.page.pageNumber}. Найдено полей: ${next.fields.length}.`);
-          return;
-        }
-
-        setSessionCandidate(next);
-        const targetPage = relation.kind === "known" ? relation.page.pageNumber : relation.suggestedPage;
+    try {
+      const next = await scanActivePage();
+      setPage(next);
+      setActiveTabId(next.tabId);
+      if (!quiet) {
         setStatus(
-          relation.kind === "known"
-            ? `Обнаружена ранее посещённая страница ${targetPage}. Подтвердите переход в текущей сессии.`
-            : `Обнаружена новая форма. Можно продолжить текущую сессию как страницу ${targetPage}.`,
+          next.manifest.fields.length
+            ? `Форма найдена: ${next.manifest.fields.length} полей. Можно подготовить пакет для ИИ.`
+            : "На видимой странице не найдено доступных полей формы.",
         );
-        return;
       }
-
-      setSessionCandidate(null);
-      setStatus(`Найдено полей: ${next.fields.length}. Идентификаторы Fxx показаны на странице.`);
-    });
-
-  const startSession = () =>
-    run(async () => {
-      if (!manifest) throw new Error("Сначала проанализируйте первую страницу формы.");
-      const next = acceptManifestInSession(createFormSession(), manifest);
-      await persistActiveSession(next);
-      setSession(next);
-      setSessionCandidate(null);
-      setPreview(null);
-      setRequest(null);
-      setResult(null);
-      setStatus("Многостраничная сессия начата. Текущая форма — страница 1.");
-    });
-
-  const continueSession = () =>
-    run(async () => {
-      if (!session || !sessionCandidate) throw new Error("Нет новой страницы для продолжения сессии.");
-      const next = acceptManifestInSession(session, sessionCandidate);
-      await persistActiveSession(next);
-      setSession(next);
-      setSessionCandidate(null);
-      setPreview(null);
-      setRequest(null);
-      setResult(null);
-      const page = currentSessionPage(next);
-      setStatus(`Сессия продолжена: страница ${page?.pageNumber ?? next.currentPage}.`);
-    });
-
-  const endSession = () =>
-    run(async () => {
-      await persistActiveSession(null);
-      setSession(null);
-      setSessionCandidate(null);
-      setPreview(null);
-      setRequest(null);
-      setResult(null);
-      setStatus("Многостраничная сессия завершена. Текущие значения полей не сохранялись.");
-    });
-
-  const toggleNumbers = () =>
-    run(async () => {
-      const shown = await callTab<boolean>("toggleOverlay");
-      setOverlayVisible(shown);
-      setStatus(shown ? "Номера полей показаны." : "Номера полей скрыты.");
-    });
-
-  const copyForGpt = () =>
-    run(async () => {
-      if (!manifest) throw new Error("Сначала проанализируйте форму.");
-      await ensurePageNotChanged();
-      if (sessionCandidate) throw new Error("Сначала подтвердите продолжение сессии на этой странице или завершите сессию.");
-
-      if (session) {
-        const page = currentSessionPage(session);
-        if (!page || !sessionMatchesManifest(session, manifest)) {
-          throw new Error("Текущая форма не привязана к активной странице сессии.");
-        }
-        await navigator.clipboard.writeText(
-          makeGptPacket(manifest, { sessionId: session.id, pageNumber: page.pageNumber }),
-        );
-        setStatus(`Промпт страницы ${page.pageNumber} с идентификаторами P${page.pageNumber}-Fxx скопирован для ИИ.`);
-        return;
+      return next;
+    } catch (cause) {
+      if (!quiet) {
+        setPage(null);
+        setError(messageFrom(cause));
+        setStatus("Страница пока недоступна для анализа.");
       }
-
-      await navigator.clipboard.writeText(makeGptPacket(manifest));
-      setStatus("Динамический промпт и manifest текущей формы скопированы для ИИ.");
-    });
-
-  const applyParsedPreview = async (text: string): Promise<void> => {
-    if (!manifest) throw new Error("Сначала проанализируйте текущую форму.");
-    await ensurePageNotChanged();
-    if (sessionCandidate) throw new Error("Сначала подтвердите продолжение сессии на этой странице или завершите сессию.");
-
-    const parsed = parseFillRequest(text);
-    const localRequest = session ? normalizeSessionFillRequest(parsed, session, manifest) : parsed;
-    const nextPreview = await callTab<PreviewResult>("preview", localRequest);
-    setJsonText(text);
-    setRequest(localRequest);
-    setPreview(nextPreview);
-    setResult(null);
-    setPreviewExpanded(false);
-    setPreviewFilter(nextPreview.counts.review + nextPreview.counts.error > 0 ? "attention" : "all");
-    setStatus(
-      `JSON распознан: ${nextPreview.counts.ok + nextPreview.counts.same} готово, ${nextPreview.counts.review} проверить, ${nextPreview.counts.error} ошибок.`,
-    );
-  };
-
-  const parseAndPreview = (text: string) => run(() => applyParsedPreview(text));
-
-  const pasteClipboard = () =>
-    run(async () => {
-      const text = await navigator.clipboard.readText();
-      if (!text.trim()) throw new Error("Буфер обмена пуст.");
-      await applyParsedPreview(text);
-    });
-
-  const fill = () =>
-    run(async () => {
-      if (!manifest || !request || !preview) throw new Error("Сначала загрузите JSON и проверьте preview.");
-      await ensurePageNotChanged();
-      if (sessionCandidate) throw new Error("Сначала подтвердите текущую страницу сессии.");
-      if (preview.pageMismatch) throw new Error("Fingerprint страницы отличается. Выполните анализ заново и получите новый JSON.");
-      if (preview.counts.error > 0) throw new Error("В preview есть ошибки. Исправьте JSON перед заполнением.");
-
-      const next = await callTab<FillResult>("fill", request);
-      setResult(next);
-      setHistory(await saveHistory(manifest, next));
-
-      if (session) {
-        const updatedSession = recordSessionFillResult(session, manifest, next);
-        await persistActiveSession(updatedSession);
-        setSession(updatedSession);
-      }
-
-      setStatus(
-        `Заполнение завершено: ${next.filled} изменено, ${next.same} уже совпадало, ${next.review} проверить, ${next.errors} ошибок.`,
-      );
-    });
-
-  const undo = () =>
-    run(async () => {
-      await ensurePageNotChanged();
-      const undoResult = await callTab<UndoResult>("undo");
-      setResult(null);
-      setStatus(`Отменено изменений: ${undoResult.restored}. Ошибок: ${undoResult.errors}.`);
-    });
-
-  const copyResultForGpt = () =>
-    run(async () => {
-      if (!manifest || !result) throw new Error("Нет результата заполнения для отчёта.");
-      const page = session ? currentSessionPage(session) : null;
-      const options = page && sessionMatchesManifest(session!, manifest)
-        ? {
-            mapId: (id: string) => qualifySessionFieldId(page.pageNumber, id),
-            session: { id: session!.id, page: page.pageNumber },
-          }
-        : undefined;
-      await navigator.clipboard.writeText(stringifyGptFeedbackReport(manifest, result, options));
-      setStatus("Privacy-safe отчёт о проблемных полях скопирован для ИИ. Защищённые поля исключены.");
-    });
-
-  const highlightProblems = () =>
-    run(async () => {
-      if (!problemResults.length) throw new Error("Нет проблемных полей для подсветки.");
-      const count = await callTab<number>(
-        "highlightProblems",
-        problemResults.map((item) => ({
-          id: item.id,
-          status: item.status === "error" ? "error" as const : "review" as const,
-        })),
-      );
-      setOverlayVisible(true);
-      setStatus(`Подсвечено проблемных полей: ${count}. Красные — ошибки, жёлтые — требуют проверки.`);
-    });
-
-  const clearHistory = () =>
-    run(async () => {
-      await browser.storage.local.remove("history");
-      setHistory([]);
-      setStatus("Локальная история операций очищена.");
-    });
-
-  const handlePendingCommand = async () => {
-    const stored = await browser.storage.local.get("pendingCommand");
-    const pending = stored.pendingCommand as { command?: string; createdAt?: number } | undefined;
-    if (!pending?.command || !pending.createdAt || Date.now() - pending.createdAt > 10_000) return;
-    await browser.storage.local.remove("pendingCommand");
-    if (pending.command === "analyze-form") analyze();
-    if (pending.command === "paste-json") pasteClipboard();
-    if (pending.command === "fill-preview") fill();
+      return null;
+    } finally {
+      if (!quiet) setBusy(null);
+    }
   };
 
   useEffect(() => {
-    void Promise.all([loadHistory(), loadActiveSession()]).then(([storedHistory, storedSession]) => {
-      setHistory(storedHistory);
-      setSession(storedSession);
-      if (storedSession) {
-        const page = currentSessionPage(storedSession);
-        setStatus(`Восстановлена локальная сессия${page ? `, страница ${page.pageNumber}` : ""}. Проанализируйте текущую форму.`);
-      }
+    void browser.storage.local.get(ADVANCED_STORAGE_KEY).then((stored) => {
+      setAdvanced(stored[ADVANCED_STORAGE_KEY] === true);
     });
+    void refreshPage();
   }, []);
 
   useEffect(() => {
-    void handlePendingCommand();
-    const listener = (changes: Record<string, browser.storage.StorageChange>, area: string) => {
-      if (area === "local" && changes.pendingCommand?.newValue) void handlePendingCommand();
+    void browser.storage.local.set({ [ADVANCED_STORAGE_KEY]: advanced });
+  }, [advanced]);
+
+  useEffect(() => {
+    const onActivated = (info: browser.tabs.OnActivatedActiveInfoType) => {
+      setActiveTabId(info.tabId);
     };
-    browser.storage.onChanged.addListener(listener);
-    return () => browser.storage.onChanged.removeListener(listener);
-  }, [manifest, request, preview, session, sessionCandidate]);
+    const onUpdated = (tabId: number, changeInfo: browser.tabs._OnUpdatedChangeInfo) => {
+      if (!packet || tabId !== packet.tabId) return;
+      if (changeInfo.url || changeInfo.status === "loading") {
+        setStaleReason("Исходная вкладка перешла на другую страницу. Перед применением ответа подготовьте новый пакет.");
+      }
+    };
+    const onRemoved = (tabId: number) => {
+      if (packet?.tabId === tabId) {
+        setStaleReason("Исходная вкладка формы закрыта. Откройте форму и подготовьте новый пакет.");
+      }
+    };
+
+    browser.tabs.onActivated.addListener(onActivated);
+    browser.tabs.onUpdated.addListener(onUpdated);
+    browser.tabs.onRemoved.addListener(onRemoved);
+    return () => {
+      browser.tabs.onActivated.removeListener(onActivated);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      browser.tabs.onRemoved.removeListener(onRemoved);
+    };
+  }, [packet]);
+
+  const clearAfterCapture = (): void => {
+    setResponseText("");
+    setRequest(null);
+    setPreview(null);
+    setResult(null);
+    setAiDecision(null);
+    setStaleReason("");
+  };
+
+  const preparePacket = (): void => {
+    void run("capture", async () => {
+      setStatus("Анализируем форму, маскируем текущие значения и делаем снимок…");
+      const nextPage = await scanActivePage();
+      if (!nextPage.manifest.fields.length) {
+        throw new Error("На странице не найдено полей, которые расширение может безопасно заполнить.");
+      }
+
+      const tab = await activeTab();
+      if (tab.id !== nextPage.tabId) {
+        throw new Error("Активная вкладка изменилась во время анализа. Повторите подготовку пакета.");
+      }
+
+      let masksEnabled = false;
+      let dataUrl = "";
+      try {
+        await togglePrivacyMasks(tab.id);
+        masksEnabled = true;
+        await delay(140);
+        dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      } finally {
+        if (masksEnabled) {
+          try {
+            await togglePrivacyMasks(tab.id);
+          } catch {
+            // capture-mask.js removes its own masks after the safety timeout as well.
+          }
+        }
+      }
+
+      if (!dataUrl.startsWith("data:image/png")) {
+        throw new Error("Firefox не вернул PNG активной вкладки.");
+      }
+
+      const capturedAt = new Date().toISOString();
+      let screenshotCopied = false;
+      try {
+        await copyPng(dataUrl);
+        screenshotCopied = true;
+      } catch {
+        // Explicit copy/download controls remain available.
+      }
+
+      const nextPacket: CapturePacket = {
+        captureId: createCaptureId(),
+        tabId: tab.id,
+        windowId: tab.windowId,
+        title: nextPage.title,
+        pageUrl: nextPage.pageUrl,
+        capturedAt,
+        dataUrl,
+        filename: aiCaptureFilename(capturedAt),
+        manifest: nextPage.manifest,
+        screenshotCopied,
+      };
+
+      setPage(nextPage);
+      setActiveTabId(tab.id);
+      setPacket(nextPacket);
+      clearAfterCapture();
+      setStatus(
+        screenshotCopied
+          ? "Пакет готов. Снимок уже скопирован; добавьте исходные данные и скопируйте промпт."
+          : "Пакет готов. Firefox не дал скопировать изображение автоматически — используйте кнопку «Скопировать снимок».",
+      );
+      await browser.storage.local.set({
+        lastCaptureMeta: {
+          version,
+          captureId: nextPacket.captureId,
+          tabId: nextPacket.tabId,
+          page: pagePath(nextPacket.pageUrl),
+          pageFingerprint: nextPacket.manifest.pageFingerprint,
+          fieldCount: nextPacket.manifest.fields.length,
+          capturedAt,
+        },
+      });
+      scrollTo("handoff-card");
+    });
+  };
+
+  const copyScreenshot = (): void => {
+    void run("copy-image", async () => {
+      if (!packet) throw new Error("Сначала подготовьте пакет для ИИ.");
+      await copyPng(packet.dataUrl);
+      setPacket({ ...packet, screenshotCopied: true });
+      setStatus("Снимок скопирован. Вставьте его в диалог vision-ИИ.");
+    });
+  };
+
+  const copyPrompt = (): void => {
+    void run("copy-prompt", async () => {
+      if (!packet) throw new Error("Сначала подготовьте пакет для ИИ.");
+      await navigator.clipboard.writeText(prompt);
+      setStatus(
+        sourceData.trim()
+          ? "Промпт с исходными данными скопирован. Вставьте его после снимка в тот же диалог ИИ."
+          : "Промпт скопирован без исходных данных. ИИ не должен угадывать значения и, вероятно, вернёт вопросы needs_input.",
+      );
+      window.setTimeout(() => responseRef.current?.focus(), 120);
+    });
+  };
+
+  const ensureOriginalPage = async (): Promise<FormManifest> => {
+    if (!packet) throw new Error("Нет активного пакета. Подготовьте снимок и промпт заново.");
+    if (staleReason) throw new Error(staleReason);
+
+    const tab = await activeTab();
+    setActiveTabId(tab.id);
+    if (tab.id !== packet.tabId) {
+      throw new Error(
+        `Вернитесь на вкладку исходной формы «${packet.title}» (${pageHost(packet.pageUrl)}), затем повторите проверку. Пакет сохранён и не потерян.`,
+      );
+    }
+
+    const fresh = await callTab<FormManifest>("scan");
+    if (fresh.pageFingerprint !== packet.manifest.pageFingerprint) {
+      const reason = "Форма изменилась после снимка: pageFingerprint больше не совпадает. Подготовьте новый пакет.";
+      setStaleReason(reason);
+      throw new Error(reason);
+    }
+    return fresh;
+  };
+
+  const reviewResponse = (): void => {
+    void run("review", async () => {
+      if (!packet) throw new Error("Сначала подготовьте пакет для ИИ.");
+      let text = responseText.trim();
+      if (!text) {
+        text = (await navigator.clipboard.readText()).trim();
+        if (!text) throw new Error("Вставьте JSON от ИИ в поле ответа или скопируйте его в буфер обмена.");
+        setResponseText(text);
+      }
+
+      const parsed = parseAiFillResponse(text);
+      const decision = validateAiFillResponse(parsed, {
+        captureId: packet.captureId,
+        pageFingerprint: packet.manifest.pageFingerprint,
+        manifest: packet.manifest,
+      });
+      setAiDecision(decision);
+      setRequest(null);
+      setPreview(null);
+      setResult(null);
+
+      if (decision.kind === "mismatch") {
+        setStatus("ИИ обнаружил несоответствие скриншота и manifest. Ничего не будет заполнено.");
+        throw new Error(decision.message);
+      }
+      if (decision.kind === "needs_input") {
+        setStatus("ИИ не хватает точных данных. Добавьте ответы в «Исходные данные», затем снова скопируйте промпт.");
+        scrollTo("ai-questions");
+        return;
+      }
+
+      await ensureOriginalPage();
+      const nextPreview = await callTab<PreviewResult>("preview", decision.request);
+      setRequest(decision.request);
+      setPreview(nextPreview);
+      setStatus(
+        `Проверка готова: ${nextPreview.counts.ok + nextPreview.counts.same} допустимо, ${nextPreview.counts.review} требует внимания, ${nextPreview.counts.error} ошибок.`,
+      );
+      scrollTo("preview-card");
+    });
+  };
+
+  const fillSafeFields = (): void => {
+    void run("fill", async () => {
+      if (!request || !preview) throw new Error("Сначала проверьте ответ ИИ и просмотрите изменения.");
+      await ensureOriginalPage();
+      if (preview.pageMismatch) throw new Error("Ответ относится к другой версии страницы. Подготовьте новый пакет.");
+      if (preview.counts.error > 0) throw new Error("В предварительной проверке есть ошибки. Исправьте ответ ИИ перед заполнением.");
+
+      const next = await callTab<FillResult>("fill", request);
+      setResult(next);
+      setStatus(
+        `Заполнение завершено: ${next.filled} изменено, ${next.same} уже совпадало, ${next.review} проверить, ${next.errors} ошибок.`,
+      );
+      scrollTo("result-card");
+    });
+  };
+
+  const undo = (): void => {
+    void run("undo", async () => {
+      await ensureOriginalPage();
+      const restored = await callTab<UndoResult>("undo");
+      setResult(null);
+      setStatus(`Отменено изменений: ${restored.restored}. Ошибок отмены: ${restored.errors}.`);
+    });
+  };
+
+  const toggleNumbers = (): void => {
+    void run("scan", async () => {
+      await ensureOriginalPage();
+      const visible = await callTab<boolean>("toggleOverlay");
+      setStatus(visible ? "Метки Fxx показаны на форме." : "Метки Fxx скрыты.");
+    });
+  };
+
+  const resetFlow = (keepSourceData = true): void => {
+    setPacket(null);
+    setResponseText("");
+    setRequest(null);
+    setPreview(null);
+    setResult(null);
+    setAiDecision(null);
+    setStaleReason("");
+    setError("");
+    if (!keepSourceData) setSourceData("");
+    setStatus("Пакет сброшен. Проверьте страницу и подготовьте новый снимок.");
+    void refreshPage(true);
+    scrollTo("top");
+  };
+
+  const copyDiagnostics = (): void => {
+    void run("diagnostics", async () => {
+      const tab = await activeTab().catch(() => null);
+      const diagnostics = {
+        extensionVersion: version,
+        userAgent: navigator.userAgent,
+        activeTabId: tab?.id ?? null,
+        capturedTabId: packet?.tabId ?? null,
+        capturedPage: packet ? pagePath(packet.pageUrl) : null,
+        captureId: packet?.captureId ?? null,
+        pageFingerprint: packet?.manifest.pageFingerprint ?? page?.manifest.pageFingerprint ?? null,
+        fieldCount: packet?.manifest.fields.length ?? page?.manifest.fields.length ?? null,
+        staleReason: staleReason || null,
+        lastError: error || null,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+      setStatus("Диагностика без значений полей скопирована в буфер обмена.");
+    });
+  };
+
+  const previewItems = preview?.items.slice(0, MAX_PREVIEW_ITEMS) ?? [];
+  const decisionWarnings = aiDecision?.warnings ?? [];
+  const questions = aiDecision?.kind === "needs_input" ? aiDecision.questions : [];
 
   return (
-    <main class="app">
-      <header class="header">
-        <div>
-          <div class="title">FormFill Assistant</div>
-          <div class="small">ИИ → JSON → preview → безопасное заполнение</div>
+    <main id="top" class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <img src="../icons/formfill.svg" alt="" class="brand-icon" />
+          <div>
+            <div class="brand-title">FormFill Assistant</div>
+            <div class="brand-subtitle">Снимок → ИИ → проверка → заполнение</div>
+          </div>
         </div>
-        <div class="version">v{browser.runtime.getManifest().version}</div>
+        <span class="version">v{version}</span>
       </header>
 
-      {error && <div class="card error" role="alert">{error}</div>}
+      <div class="progress" aria-label={`Шаг ${stage} из 5`}>
+        {["Страница", "Пакет", "Ответ", "Проверка", "Готово"].map((label, index) => {
+          const number = index + 1;
+          const state = number < stage ? "done" : number === stage ? "active" : "";
+          return (
+            <div class={`progress-step ${state}`} key={label} aria-current={number === stage ? "step" : undefined}>
+              <span>{number < stage ? "✓" : number}</span>
+              <small>{label}</small>
+            </div>
+          );
+        })}
+      </div>
 
-      <section class="card">
-        {manifest ? (
-          <div class="metrics">
-            <div class="metric"><strong>{manifest.fields.length}</strong>полей</div>
-            <div class="metric"><strong>{requiredCount}</strong>обязательных</div>
-            <div class="metric"><strong>{selectCount}</strong>выборов</div>
-            <div class="metric"><strong>{protectedCount}</strong>защищённых</div>
-          </div>
-        ) : (
-          <div class="status">{status}</div>
-        )}
+      <section class={`page-card ${page?.manifest.fields.length ? "ready" : ""}`}>
+        <div class="page-state-icon" aria-hidden="true">{busy === "scan" ? "…" : page?.manifest.fields.length ? "✓" : "!"}</div>
+        <div class="page-summary">
+          <strong>{page ? pageHost(page.pageUrl) : "Текущая страница"}</strong>
+          <span>{page?.title || status}</span>
+          {page && (
+            <div class="page-metrics">
+              <span>{page.manifest.fields.length} полей</span>
+              <span>{requiredCount} обязательных</span>
+              <span>{protectedCount} защищённых</span>
+            </div>
+          )}
+        </div>
+        <button class="icon-button" type="button" disabled={busy !== null} onClick={() => void refreshPage()} title="Проверить страницу" aria-label="Проверить страницу">↻</button>
       </section>
 
-      <section class={`card session-card ${sessionCandidate ? "warning" : ""}`}>
-        {session ? (
-          <>
-            <div class="section-head">
+      {error && (
+        <section class="message error-message" role="alert">
+          <strong>Не удалось продолжить</strong>
+          <p>{error}</p>
+          <div class="inline-actions">
+            <button type="button" onClick={() => location.reload()}>Перезапустить панель</button>
+            <button type="button" disabled={busy !== null} onClick={copyDiagnostics}>Скопировать диагностику</button>
+          </div>
+        </section>
+      )}
+
+      {staleReason && (
+        <section class="message warning-message" role="alert">
+          <strong>Пакет устарел</strong>
+          <p>{staleReason}</p>
+          <button class="primary" type="button" disabled={busy !== null} onClick={preparePacket}>Подготовить новый пакет</button>
+        </section>
+      )}
+
+      {!packet ? (
+        <section class="workspace-card hero-card">
+          <div class="eyebrow">Один основной сценарий</div>
+          <h1>Подготовьте текущую форму для ИИ</h1>
+          <p class="lead">
+            Расширение само найдёт поля, присвоит им Fxx, временно закроет уже введённые значения и сделает снимок. Никакие данные не отправляются автоматически.
+          </p>
+
+          <label class="field-label" for="source-data-before">Исходные данные для заполнения <span>необязательно сейчас</span></label>
+          <textarea
+            id="source-data-before"
+            class="source-data"
+            value={sourceData}
+            onInput={(event) => setSourceData((event.currentTarget as HTMLTextAreaElement).value)}
+            placeholder={'Например:\nИмя: Иван Петров\nТелефон: +7 999 000-00-00\nСообщение: Прошу перезвонить после 15:00'}
+            spellcheck={false}
+          />
+          <p class="field-help">Значения хранятся только в этой панели и попадут наружу лишь когда вы вручную скопируете промпт.</p>
+
+          <button
+            class="primary primary-large"
+            type="button"
+            disabled={busy !== null || !page?.manifest.fields.length}
+            onClick={preparePacket}
+          >
+            {busy === "capture" ? "Готовим снимок…" : "Подготовить снимок и промпт"}
+          </button>
+
+          {!page?.manifest.fields.length && busy === null && (
+            <button class="secondary" type="button" onClick={() => void refreshPage()}>Сначала проверить страницу</button>
+          )}
+
+          <div class="safety-row">
+            <span>Без сервера</span>
+            <span>Без автоподстановки до preview</span>
+            <span>Без Submit</span>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section id="handoff-card" class="workspace-card">
+            <div class="section-heading">
               <div>
-                <strong>Многостраничная сессия</strong>
-                <div class="small">
-                  {sessionPage ? `Страница ${sessionPage.pageNumber}` : "Ожидается первая страница"} · {session.pages.length} стр. · {session.id.slice(0, 8)}
+                <div class="eyebrow">Пакет привязан к снимку</div>
+                <h2>{packet.title}</h2>
+              </div>
+              <button class="text-button" type="button" onClick={() => resetFlow(true)}>Начать заново</button>
+            </div>
+
+            <img class="screenshot-preview" src={packet.dataUrl} alt="Снимок текущей формы с метками Fxx" />
+            <div class="binding-strip">
+              <span>capture {packet.captureId.slice(0, 8)}…</span>
+              <span>fingerprint {packet.manifest.pageFingerprint}</span>
+              <span>{packet.manifest.fields.length} полей</span>
+              <span>{formatTime(packet.capturedAt)}</span>
+            </div>
+
+            {!currentTabIsForm && (
+              <div class="message info-message">
+                <strong>Вы на другой вкладке</strong>
+                <p>Это нормально для работы с ИИ. Пакет сохранён для {pageHost(packet.pageUrl)}. Перед проверкой или заполнением вернитесь к вкладке формы.</p>
+              </div>
+            )}
+
+            <label class="field-label" for="source-data">Исходные данные для ИИ <span>не давайте ИИ угадывать</span></label>
+            <textarea
+              id="source-data"
+              class="source-data"
+              value={sourceData}
+              onInput={(event) => setSourceData((event.currentTarget as HTMLTextAreaElement).value)}
+              placeholder="Вставьте точные данные, из которых нужно заполнить форму. Если данных нет, ИИ должен вернуть needs_input и вопросы."
+              spellcheck={false}
+            />
+
+            <div class="handoff-grid">
+              <button class="secondary" type="button" disabled={busy !== null} onClick={copyScreenshot}>
+                {busy === "copy-image" ? "Копируем…" : packet.screenshotCopied ? "✓ Снимок скопирован" : "1. Скопировать снимок"}
+              </button>
+              <button class="primary" type="button" disabled={busy !== null} onClick={copyPrompt}>
+                {busy === "copy-prompt" ? "Копируем…" : "2. Скопировать промпт"}
+              </button>
+              <button class="secondary wide" type="button" disabled={busy !== null} onClick={() => downloadPng(packet.dataUrl, packet.filename)}>
+                Скачать PNG
+              </button>
+            </div>
+
+            <ol class="handoff-help">
+              <li>Откройте ChatGPT, Claude, Gemini или другой vision-ИИ в отдельной вкладке.</li>
+              <li>Вставьте снимок, затем промпт в тот же диалог.</li>
+              <li>ИИ обязан вернуть JSON v2 с тем же captureId и полным fingerprint.</li>
+            </ol>
+
+            <label class="field-label" for="ai-response">Ответ ИИ</label>
+            <textarea
+              ref={responseRef}
+              id="ai-response"
+              class="ai-response"
+              value={responseText}
+              onInput={(event) => {
+                setResponseText((event.currentTarget as HTMLTextAreaElement).value);
+                setAiDecision(null);
+              }}
+              placeholder='Вставьте JSON, начинающийся с {"version":2,...}. Можно оставить поле пустым, если JSON уже скопирован в буфер.'
+              spellcheck={false}
+            />
+            <button class="primary primary-large" type="button" disabled={busy !== null} onClick={reviewResponse}>
+              {busy === "review" ? "Проверяем ответ…" : "Проверить ответ ИИ"}
+            </button>
+          </section>
+
+          {questions.length > 0 && (
+            <section id="ai-questions" class="workspace-card questions-card">
+              <div class="eyebrow">ИИ не хватает данных</div>
+              <h2>Уточните значения, не меняя форму</h2>
+              <ul>
+                {questions.map((question) => <li key={question}>{question}</li>)}
+              </ul>
+              {decisionWarnings.length > 0 && (
+                <div class="warning-list">
+                  {decisionWarnings.map((warning) => <p key={warning}>{warning}</p>)}
                 </div>
-              </div>
-              <button class="text-button danger compact" disabled={busy} onClick={endSession}>Завершить</button>
-            </div>
-
-            {sessionCandidate && (
-              <div class="session-candidate">
-                <strong>Обнаружена другая форма</strong>
-                <p class="small">Она не станет следующей страницей сессии без вашего подтверждения.</p>
-                <button class="primary" disabled={busy} onClick={continueSession}>Продолжить текущую сессию</button>
-              </div>
-            )}
-
-            {session.pages.length > 0 && (
-              <div class="session-pages">
-                {session.pages.map((page) => (
-                  <span class={page.pageNumber === session.currentPage ? "selected" : ""} key={page.pageNumber}>
-                    P{page.pageNumber} · {page.fieldCount}
-                    {page.completedAt ? ` · ${page.errors ? `${page.errors} ✕` : "✓"}` : ""}
-                  </span>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <div class="section-head">
-            <div>
-              <strong>Многостраничная анкета</strong>
-              <div class="small">Опционально: P1-Fxx, P2-Fxx… без автоматического перехода между страницами.</div>
-            </div>
-            <button disabled={busy || !manifest} onClick={startSession}>Начать сессию</button>
-          </div>
-        )}
-      </section>
-
-      <section class="actions main">
-        <button class="primary" disabled={busy} onClick={analyze}>1. Анализировать форму</button>
-        <button disabled={busy || !manifest} onClick={toggleNumbers}>
-          2. {overlayVisible ? "Скрыть Fxx" : "Показать Fxx"}
-        </button>
-        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={copyForGpt}>3. Скопировать промпт для ИИ</button>
-        <button disabled={busy || !manifest || Boolean(sessionCandidate)} onClick={pasteClipboard}>4. Вставить ответ ИИ</button>
-      </section>
+              )}
+              <p class="field-help">Добавьте ответы в поле «Исходные данные для ИИ» выше и снова нажмите «Скопировать промпт».</p>
+            </section>
+          )}
+        </>
+      )}
 
       {preview && (
-        <section class={`card ${preview.pageMismatch ? "warning" : ""}`}>
-          <div class="section-head">
-            <strong>Предварительная проверка</strong>
-            <div class="segmented" aria-label="Фильтр preview">
-              <button
-                class={previewFilter === "all" ? "selected" : ""}
-                onClick={() => { setPreviewFilter("all"); setPreviewExpanded(false); }}
-              >Все {preview.items.length}</button>
-              <button
-                class={previewFilter === "attention" ? "selected" : ""}
-                onClick={() => { setPreviewFilter("attention"); setPreviewExpanded(false); }}
-              >Требуют внимания {preview.counts.review + preview.counts.error}</button>
+        <section id="preview-card" class={`workspace-card preview-card ${preview.pageMismatch ? "invalid" : ""}`}>
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">Обязательная проверка</div>
+              <h2>Что изменится на странице</h2>
+            </div>
+            <div class="preview-counts">
+              <span class="ok">{preview.counts.ok + preview.counts.same} допустимо</span>
+              <span class="review">{preview.counts.review} проверить</span>
+              <span class="bad">{preview.counts.error} ошибок</span>
             </div>
           </div>
 
-          {preview.pageMismatch && (
-            <div class="status warning-text">
-              ⚠ JSON создан для другой версии страницы. Текущий fingerprint: {preview.pageFingerprint}
+          {decisionWarnings.length > 0 && (
+            <div class="message warning-message compact">
+              {decisionWarnings.map((warning) => <p key={warning}>{warning}</p>)}
             </div>
           )}
 
-          {visiblePreviewItems.length ? (
-            <div class="preview">
-              {visiblePreviewItems.map((item) => (
-                <div class="preview-item" key={item.id}>
-                  <div class="preview-id">{displayFieldId(item.id)}</div>
-                  <div class="preview-values">
-                    <strong>{item.label}</strong>
-                    <div>Сейчас: {shortValue(item.currentValue)}</div>
-                    <div>Будет: {shortValue(item.requestedValue)}</div>
-                    {item.message && <div class="preview-message">{item.message}</div>}
-                  </div>
-                  <span class={`badge badge-${item.status}`}>{STATUS_LABEL[item.status]}</span>
+          <div class="preview-list">
+            {previewItems.map((item) => (
+              <article class={`preview-item status-${item.status}`} key={item.id}>
+                <div class="field-id">{item.id}</div>
+                <div class="preview-values">
+                  <strong>{item.label}</strong>
+                  <span><b>Сейчас:</b> {shortText(item.currentValue)}</span>
+                  <span><b>Будет:</b> {shortText(item.requestedValue)}</span>
+                  {item.message && <p>{item.message}</p>}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p class="small empty-state">Нет полей, требующих внимания.</p>
-          )}
-
-          {!previewExpanded && filteredPreviewItems.length > PREVIEW_LIMIT && (
-            <button class="text-button" onClick={() => setPreviewExpanded(true)}>
-              Показать остальные {filteredPreviewItems.length - PREVIEW_LIMIT}
-            </button>
-          )}
-
-          <div class="actions" style="margin-top:8px">
-            <button
-              class="primary"
-              disabled={busy || preview.pageMismatch || preview.counts.error > 0 || Boolean(sessionCandidate)}
-              onClick={fill}
-            >
-              5. Заполнить {preview.counts.ok} безопасных полей
-            </button>
+                <span class={`status-badge ${item.status}`}>{STATUS_LABEL[item.status]}</span>
+              </article>
+            ))}
           </div>
+
+          {preview.items.length > MAX_PREVIEW_ITEMS && (
+            <p class="field-help">Показаны первые {MAX_PREVIEW_ITEMS} из {preview.items.length} полей.</p>
+          )}
+
+          <button
+            class="primary primary-large"
+            type="button"
+            disabled={busy !== null || preview.pageMismatch || preview.counts.error > 0}
+            onClick={fillSafeFields}
+          >
+            {busy === "fill" ? "Заполняем…" : `Заполнить ${preview.counts.ok} безопасных полей`}
+          </button>
+          <p class="submit-note">Кнопка отправки формы не нажимается. После заполнения проверьте страницу самостоятельно.</p>
         </section>
       )}
 
       {result && (
-        <section class="card success">
-          <div class="section-head">
-            <strong>Заполнение завершено</strong>
-            <span class="small">{result.completedAt ? historyTime(result.completedAt) : ""}</span>
-          </div>
-          <div class="result-metrics">
-            <span>✓ <strong>{result.filled}</strong> изменено</span>
-            <span>= <strong>{result.same}</strong> совпадало</span>
-            <span>⚠ <strong>{result.review}</strong> проверить</span>
-            <span>✕ <strong>{result.errors}</strong> ошибок</span>
+        <section id="result-card" class="workspace-card result-card">
+          <div class="result-icon">✓</div>
+          <h2>Поля обработаны</h2>
+          <div class="result-grid">
+            <span><strong>{result.filled}</strong> изменено</span>
+            <span><strong>{result.same}</strong> совпадало</span>
+            <span><strong>{result.review}</strong> проверить</span>
+            <span><strong>{result.errors}</strong> ошибок</span>
           </div>
           {result.newFieldCount > 0 && (
-            <p class="status">После заполнения появилось новых полей: {result.newFieldCount}. Выполните анализ повторно.</p>
+            <div class="message warning-message compact">
+              После заполнения появилось новых полей: {result.newFieldCount}. Перед дальнейшим заполнением подготовьте новый пакет.
+            </div>
           )}
-          {problemResults.length > 0 && (
-            <>
-              <div class="problem-list">
-                {problemResults.map((item) => (
-                  <div class="problem-item" key={item.id}>
-                    <strong>{displayFieldId(item.id)} — {item.label}</strong>
-                    <span>{item.message ?? (item.status === "review" ? "Требуется проверка." : "Не удалось заполнить поле.")}</span>
-                  </div>
-                ))}
-              </div>
-              <div class="actions" style="margin-top:8px">
-                <button disabled={busy} onClick={highlightProblems}>Подсветить проблемные</button>
-              </div>
-            </>
-          )}
-          <div class="actions two" style="margin-top:8px">
-            <button class="danger" disabled={busy} onClick={undo}>Отменить изменения</button>
-            <button disabled={busy} onClick={copyResultForGpt}>Скопировать отчёт для ИИ</button>
+          <div class="handoff-grid">
+            <button class="secondary" type="button" disabled={busy !== null} onClick={undo}>
+              {busy === "undo" ? "Отменяем…" : "Отменить изменения"}
+            </button>
+            <button class="primary" type="button" onClick={() => resetFlow(true)}>Новый пакет</button>
           </div>
         </section>
       )}
 
-      <section class="card status" aria-live="polite">{status}</section>
+      <section class="status-line" aria-live="polite">
+        <span class={busy ? "status-dot busy" : "status-dot"}></span>
+        {status}
+      </section>
 
-      <details class="card">
-        <summary>Дополнительно</summary>
-        <div class="details-body">
-          <textarea
-            value={jsonText}
-            onInput={(event) => setJsonText((event.currentTarget as HTMLTextAreaElement).value)}
-            placeholder="Вставьте JSON вручную, если буфер недоступен"
-          />
-          <div class="actions" style="margin-top:7px">
-            <button disabled={busy || !jsonText.trim() || Boolean(sessionCandidate)} onClick={() => parseAndPreview(jsonText)}>
-              Проверить JSON
-            </button>
+      <details class="advanced-card" open={advanced} onToggle={(event) => setAdvanced((event.currentTarget as HTMLDetailsElement).open)}>
+        <summary>Расширенные инструменты и диагностика</summary>
+        <div class="advanced-body">
+          <div class="advanced-actions">
+            <button type="button" disabled={!packet || busy !== null} onClick={toggleNumbers}>Показать/скрыть Fxx</button>
+            <button type="button" disabled={busy !== null} onClick={copyDiagnostics}>Скопировать диагностику</button>
+            <button type="button" disabled={busy !== null} onClick={() => location.reload()}>Перезапустить панель</button>
+            <button type="button" onClick={() => resetFlow(false)}>Сбросить всё</button>
           </div>
-          {manifest?.unsupportedCrossOriginFrames ? (
-            <p class="small">Недоступных cross-origin iframe: {manifest.unsupportedCrossOriginFrames}.</p>
-          ) : null}
-          {manifest && <p class="small">Fingerprint: {manifest.pageFingerprint}</p>}
+          {packet && (
+            <>
+              <p class="technical">Страница: {pagePath(packet.pageUrl)}</p>
+              <p class="technical">captureId: {packet.captureId}</p>
+              <p class="technical">pageFingerprint: {packet.manifest.pageFingerprint}</p>
+              <label class="field-label" for="raw-prompt">Текущий динамический промпт</label>
+              <textarea id="raw-prompt" class="technical-textarea" readonly value={prompt} />
+            </>
+          )}
+          <button
+            class="text-button"
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(makePortableAiPromptTemplate())}
+          >
+            Скопировать универсальный шаблон без manifest
+          </button>
         </div>
       </details>
 
-      <details class="card">
-        <summary>История ({history.length})</summary>
-        <div class="details-body">
-          {history.length ? (
-            <div class="history-list">
-              {history.map((entry, index) => (
-                <div class="history-item" key={`${entry.timestamp}-${index}`}>
-                  <div>
-                    <strong>{entry.page}</strong>
-                    <span>{historyTime(entry.timestamp)}</span>
-                  </div>
-                  <div class="history-stats">
-                    {entry.successful}/{entry.fields} ✓
-                    {entry.review > 0 && <> · {entry.review} ⚠</>}
-                    {entry.errors > 0 && <> · {entry.errors} ✕</>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p class="small empty-state">История пока пуста. Значения полей здесь не сохраняются.</p>
-          )}
-          {history.length > 0 && (
-            <button class="text-button danger" disabled={busy} onClick={clearHistory}>Очистить историю</button>
-          )}
-        </div>
-      </details>
+      <footer class="app-footer">Локальная обработка · без telemetry · без auto-submit</footer>
     </main>
   );
 }
 
-render(<App />, document.getElementById("app")!);
+function showFatalError(cause: unknown): void {
+  const root = document.getElementById("app") ?? document.body;
+  root.replaceChildren();
+
+  const card = document.createElement("section");
+  card.className = "fatal-card";
+  const title = document.createElement("strong");
+  title.textContent = "FormFill Assistant не запустился";
+  const text = document.createElement("p");
+  text.textContent = messageFrom(cause);
+  const help = document.createElement("p");
+  help.textContent = "Обновите расширение, перезапустите Firefox и приложите это сообщение к отчёту об ошибке.";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Перезапустить панель";
+  button.addEventListener("click", () => location.reload());
+  card.append(title, text, help, button);
+  root.append(card);
+}
+
+window.addEventListener("error", (event) => showFatalError(event.error ?? event.message));
+window.addEventListener("unhandledrejection", (event) => showFatalError(event.reason));
+
+try {
+  const root = document.getElementById("app");
+  if (!root) throw new Error("В sidebar отсутствует корневой элемент #app.");
+  render(<App />, root);
+  document.documentElement.dataset.formfillReady = "true";
+  document.getElementById("boot-fallback")?.remove();
+} catch (cause) {
+  showFatalError(cause);
+}
