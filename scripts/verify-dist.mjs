@@ -59,7 +59,7 @@ for (const marker of [
   "Подготовить снимок и промпт",
   "parseAiFillResponse",
   "captureId",
-  "data-formfill-ready",
+  "formfillReady",
 ]) {
   if (!script.includes(marker) && !sidebarHtml.includes(marker)) {
     throw new Error(`Sidebar startup bundle is missing marker: ${marker}`);
@@ -69,9 +69,9 @@ if (!style.includes(".fatal-card") || !style.includes(".workspace-card")) {
   throw new Error("sidebar/sidebar.css is missing fatal fallback or workflow styles");
 }
 
-const unexpectedJavaScript = references.filter((reference) => extname(reference.split(/[?#]/, 1)[0]) === ".js");
-if (unexpectedJavaScript.length !== 1 || unexpectedJavaScript[0] !== "./sidebar.js") {
-  throw new Error(`Expected exactly one deterministic sidebar script, got: ${unexpectedJavaScript.join(", ")}`);
+const javascriptReferences = references.filter((reference) => extname(reference.split(/[?#]/, 1)[0]) === ".js");
+if (javascriptReferences.length !== 1 || javascriptReferences[0] !== "./sidebar.js") {
+  throw new Error(`Expected exactly one deterministic sidebar script, got: ${javascriptReferences.join(", ")}`);
 }
 
 console.log(`Verified deterministic sidebar: ${panelPath}; ${references.length} local assets.`);
