@@ -2,6 +2,33 @@
 
 All notable user-facing changes to FormFill Assistant are documented here.
 
+## 0.5.0
+
+### Capture-bound AI contract
+
+- every screenshot now receives a random `captureId` bound to the compact manifest and full `pageFingerprint`;
+- AI responses use contract v2 with explicit `ready`, `needs_input` and `mismatch` outcomes;
+- the extension rejects old v1 responses, abbreviated fingerprints, another captureId, unknown Fxx identifiers, protected targets and invalid select options before DOM preview;
+- empty source data produces questions instead of fabricated names, addresses, phones or consent values;
+- a saved package survives switching to an AI tab, while preview/fill require returning to the original form tab and revalidating its fingerprint.
+
+### Sidebar reliability and UX
+
+- replaced two independent Preact roots with one guided application;
+- production sidebar is now a deterministic plain IIFE (`sidebar.js`) plus one static stylesheet (`sidebar.css`), eliminating hashed module-asset graphs;
+- static boot fallback remains visible until the application renders;
+- uncaught startup/runtime errors produce a visible diagnostic card rather than an empty panel;
+- the page is scanned automatically on sidebar open;
+- one workflow now covers source data → screenshot/prompt → AI response → preview → fill → undo;
+- advanced prompt and diagnostics are hidden behind a disclosure panel.
+
+### Verification
+
+- added AI response binding and hallucination regression tests;
+- added a production-sidebar E2E that completes the full contract-v2 flow;
+- `verify-dist` requires exactly one non-module sidebar script, one stylesheet, valid local paths, startup markers and fatal fallback styles;
+- release automation is prepared for one explicit release trigger and idempotent AMO version retrieval.
+
 ## 0.4.2
 
 ### Critical sidebar reliability
