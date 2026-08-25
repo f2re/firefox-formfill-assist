@@ -136,7 +136,7 @@ describe("multi-page form sessions", () => {
 
     expect(qualifySessionFieldId(1, "F01")).toBe("P1-F01");
     expect(packet).toContain('"P1-F01"');
-    expect(packet).toContain('"page": 1');
+    expect(packet).toContain('"session":{"id":"session-visible","page":1,"fieldPrefix":"P1-"}');
     expect(isFormSessionExpired(session, 2_000 + 11 * 60 * 60 * 1000)).toBe(false);
     expect(isFormSessionExpired(session, 2_000 + 13 * 60 * 60 * 1000)).toBe(true);
   });

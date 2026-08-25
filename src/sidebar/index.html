@@ -8,17 +8,14 @@
     <title>FormFill Assistant</title>
     <link rel="icon" href="../icons/formfill.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./sidebar.css" />
-    <link rel="stylesheet" href="./ai-handoff.css" />
   </head>
   <body>
     <div id="boot-fallback" class="boot-fallback" role="status">
-      <strong>FormFill Assistant загружается…</strong>
-      <p>Подготавливаем пошаговый интерфейс заполнения формы.</p>
-      <p class="boot-help">Если это сообщение не исчезло, перезапустите расширение и сообщите версию Firefox и адрес страницы.</p>
+      <strong>FormFill Assistant запускается…</strong>
+      <p>Проверяем страницу и загружаем пошаговый интерфейс.</p>
+      <p class="boot-help">Если сообщение осталось дольше нескольких секунд, расширение покажет диагностическую ошибку вместо пустой панели.</p>
     </div>
-    <div id="ai-handoff"></div>
     <div id="app"></div>
-    <script type="module" src="./main.tsx"></script>
-    <script type="module" src="./ai-handoff.tsx"></script>
+    <script src="./sidebar.js" defer></script>
   </body>
 </html>

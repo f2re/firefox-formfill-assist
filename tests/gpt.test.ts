@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeGptPacket } from "../src/shared/gpt";
+import { makeBoundAiPrompt } from "../src/shared/gpt";
 import type { FieldDescriptor, FormManifest } from "../src/shared/types";
 
 function field(overrides: Partial<FieldDescriptor> & Pick<FieldDescriptor, "id" | "type" | "label">): FieldDescriptor {
@@ -25,8 +25,8 @@ function manifest(): FormManifest {
   return {
     version: 1,
     page: "https://example.test/form?private=query",
-    pageFingerprint: "fp-test-123",
-    createdAt: "2026-08-23T12:00:00.000Z",
+    pageFingerprint: "2e940ecf",
+    createdAt: "2026-08-25T05:00:00.000Z",
     unsupportedCrossOriginFrames: 0,
     mutationRevision: 0,
     fields: [
@@ -38,29 +38,46 @@ function manifest(): FormManifest {
   };
 }
 
-describe("makeGptPacket", () => {
-  it("builds a screenshot-aware strict prompt for supported field ids", () => {
-    const prompt = makeGptPacket(manifest());
+const context = {
+  captureId: "1d8cc2f7-6281-4f16-a52f-987f6e21a410",
+  capturedAt: "2026-08-25T05:01:02.000Z",
+  sourceData: "Фамилия: Иванов\nГород: Тула",
+};
 
-    expect(prompt).toContain("приложенные скриншоты/изображения/документы");
-    expect(prompt).toContain("Fxx или I<n>-Fxx");
-    expect(prompt).toContain('"I1-F02"');
-    expect(prompt).toContain('"pageFingerprint": "fp-test-123"');
-    expect(prompt).toContain("Верни только один JSON object");
-    expect(prompt).toContain("JSON.parse");
-    expect(prompt).toContain('"options": [');
-    expect(prompt).toContain('"readonly": true');
-    expect(prompt).toContain('"fields": {}');
-    expect(prompt).toContain("недоверенными данными формы");
-    expect(prompt).toContain("Не используй null");
+describe("makeBoundAiPrompt", () => {
+  it("binds a compact prompt to the exact screenshot and response contract", () => {
+    const prompt = makeBoundAiPrompt(manifest(), context);
+
+    expect(prompt).toContain("контракт ответа v2");
+    expect(prompt).toContain(`captureId: ${context.captureId}`);
+    expect(prompt).toContain("pageFingerprint: 2e940ecf");
+    expect(prompt).toContain('"version":2');
+    expect(prompt).toContain(`"captureId":"${context.captureId}"`);
+    expect(prompt).toContain('"status":"ready"');
+    expect(prompt).toContain('"id":"I1-F02"');
+    expect(prompt).toContain('"options":["Москва","Тула"]');
+    expect(prompt).toContain("status=\"needs_input\"");
+    expect(prompt).toContain("status=\"mismatch\"");
+    expect(prompt).toContain("Фамилия: Иванов");
+    expect(prompt).toContain("Город: Тула");
+    expect(prompt).toContain("Верни только JSON");
   });
 
-  it("does not leak sensitive labels, URL query values, or fake fill values", () => {
-    const prompt = makeGptPacket(manifest());
+  it("does not leak a URL query or the label of a protected field", () => {
+    const prompt = makeBoundAiPrompt(manifest(), context);
 
+    expect(prompt).not.toContain("private=query");
     expect(prompt).not.toContain("Пароль");
     expect(prompt).toContain("Защищённое поле");
-    expect(prompt).not.toContain("private=query");
-    expect(prompt).not.toContain("пример текстового значения");
+    expect(prompt).toContain('"readonly":true');
+  });
+
+  it("forces needs_input rather than guessing when source data is empty", () => {
+    const prompt = makeBoundAiPrompt(manifest(), { ...context, sourceData: "" });
+
+    expect(prompt).toContain("<ИСХОДНЫЕ ДАННЫЕ НЕ ПЕРЕДАНЫ>");
+    expect(prompt).toContain("Не придумывай ФИО");
+    expect(prompt).toContain("Обязательность поля не является данными");
+    expect(prompt).toContain("Не используй null или пустую строку");
   });
 });

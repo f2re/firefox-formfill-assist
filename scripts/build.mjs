@@ -4,24 +4,34 @@ import { resolve } from "node:path";
 
 const root = process.cwd();
 const dist = resolve(root, "dist");
+const sidebarDist = resolve(dist, "sidebar");
 const firefoxTarget = "firefox126";
-await rm(dist, { recursive: true, force: true });
-await mkdir(dist, { recursive: true });
 
+await rm(dist, { recursive: true, force: true });
+await mkdir(sidebarDist, { recursive: true });
+
+// Build the sidebar as one plain IIFE with a deterministic name. This avoids
+// hashed module graphs and extension-root path resolution entirely: Firefox
+// only needs sidebar/index.html, sidebar/sidebar.css and sidebar/sidebar.js.
 await build({
   configFile: false,
-  root: resolve(root, "src/sidebar"),
-  // WebExtension pages are not hosted at the extension root. Absolute `/assets/*`
-  // URLs resolve to moz-extension://<id>/assets/* and leave the sidebar blank.
-  // A relative base keeps every emitted script/style next to sidebar/index.html.
-  base: "./",
   esbuild: { jsx: "automatic", jsxImportSource: "preact" },
   build: {
-    outDir: resolve(dist, "sidebar"),
+    outDir: sidebarDist,
     emptyOutDir: false,
     target: firefoxTarget,
+    minify: false,
+    lib: {
+      entry: resolve(root, "src/sidebar/main.tsx"),
+      name: "FormFillAssistantSidebar",
+      formats: ["iife"],
+      fileName: () => "sidebar.js",
+    },
   },
 });
+
+await cp(resolve(root, "src/sidebar/index.html"), resolve(sidebarDist, "index.html"));
+await cp(resolve(root, "src/sidebar/sidebar.css"), resolve(sidebarDist, "sidebar.css"));
 
 for (const [entry, fileName] of [
   ["src/background/background.ts", "background.js"],
@@ -57,4 +67,4 @@ if (amoIcon.length < 32 || !amoIcon.subarray(0, pngSignature.length).equals(pngS
 }
 await writeFile(resolve(dist, "icons/formfill-128.png"), amoIcon);
 
-console.log("Built extension in dist/");
+console.log("Built deterministic Firefox extension in dist/");
