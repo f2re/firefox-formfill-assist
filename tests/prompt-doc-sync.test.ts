@@ -22,14 +22,17 @@ describe("README AI prompt contract", () => {
     expect(readmePrompt()).toBe(makePortableAiPromptTemplate());
   });
 
-  it("requires a real manifest and preserves the extension JSON contract", () => {
+  it("documents screenshot binding and the three safe outcomes", () => {
     const prompt = makePortableAiPromptTemplate();
-    expect(prompt).toContain("реальный manifest текущей формы");
+    expect(prompt).toContain("контракт ответа v2");
+    expect(prompt).toContain("<CAPTURE_ID_ИЗ_РАСШИРЕНИЯ>");
+    expect(prompt).toContain("<СКОПИРУЙ_ТОЧНО_ИЗ_FORM_MANIFEST>");
+    expect(prompt).toContain('"version":2');
+    expect(prompt).toContain('"status":"ready"');
+    expect(prompt).toContain("needs_input");
+    expect(prompt).toContain("mismatch");
     expect(prompt).toContain("P<n>-I<n>-Fxx");
-    expect(prompt).toContain('"version": 1');
-    expect(prompt).toContain('"pageFingerprint": "<СКОПИРУЙ ТОЧНО ИЗ FORM_MANIFEST>"');
-    expect(prompt).toContain('"fields": {}');
-    expect(prompt).toContain("Верни только один JSON object");
+    expect(prompt).toContain("Верни только JSON");
     expect(prompt).toContain("JSON.parse");
   });
 });
